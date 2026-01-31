@@ -1,0 +1,4 @@
+requests>=2.31.0
+rich>=13.7.0
+pexpect>=4.9.0
+netifaces>=0.11.0
