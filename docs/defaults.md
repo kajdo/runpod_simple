@@ -99,6 +99,34 @@ DEFAULT_MAX_COST_PER_HOUR=0.80
 - **Behavior**: GPUs with hourly cost above this value are excluded
 - **Use Case**: Avoid "overkill" setups by setting a maximum cost threshold
 
+### DEFAULT_MODEL
+
+Specifies the Ollama model to preseed in container-only setups.
+
+```
+DEFAULT_MODEL=glm-4.7-flash
+```
+
+- **Type**: String
+- **Required**: No (only used if `DEFAULT_PRESEED=true`)
+- **Behavior**: Model name passed to `ollama pull` command
+- **Use Case**: Preload models in ephemeral container setups (no network volume)
+- **Example**: "llama3.1", "glm-4.7-flash", "mistral-7b"
+
+### DEFAULT_PRESEED
+
+Controls whether to automatically preseed the model in container-only setups.
+
+```
+DEFAULT_PRESEED=true
+```
+
+- **Type**: Boolean ("true" or "false")
+- **Required**: No (defaults to false)
+- **Behavior**: If `true` and no network volume is used, runs `ollama pull` after tunnels are established
+- **Use Case**: Automatically download models to container disk for faster startup
+- **Note**: Only applies when `DEFAULT_NETWORK_VOLUME=null` (container-only setup)
+
 ## Workflow with Defaults
 
 When you run `python main.py deploy --defaults`, the following happens:
@@ -122,10 +150,13 @@ When you run `python main.py deploy --defaults`, the following happens:
    - Select cheapest matching GPU automatically
    - Display selected GPU (no table shown)
 
-5. **Pod Deployment**
-   - Deploy pod with selected configuration
-   - Wait for pod to be running
-   - Create SSH tunnels
+ 5. **Pod Deployment**
+    - Deploy pod with selected configuration
+    - Wait for pod to be running
+    - Create SSH tunnels
+    - **Model Preseeding** (if no network volume AND `DEFAULT_PRESEED=true`):
+      - Execute `ollama pull <model>` on the pod via SSH
+      - Continue with warning if preseeding fails
 
 6. **Existing Pod Check**
    - Still prompts to reuse existing running pods (if any)
@@ -146,7 +177,7 @@ When using `--defaults`, the output is reduced:
 
 ## Example Configuration
 
-Example `.env` file for unattended deployment:
+Example `.env` file for unattended deployment with model preseeding:
 
 ```bash
 # Required: API key
@@ -158,6 +189,10 @@ DEFAULT_NETWORK_VOLUME=null
 DEFAULT_ALLOW_TWO_GPUS=false
 DEFAULT_MIN_COST_PER_HOUR=0.30
 DEFAULT_MAX_COST_PER_HOUR=0.80
+
+# Model preseeding (for container-only setups)
+DEFAULT_MODEL=glm-4.7-flash
+DEFAULT_PRESEED=true
 ```
 
 With this configuration:
@@ -166,6 +201,7 @@ With this configuration:
 3. Only single GPU configurations
 4. GPUs between $0.30-$0.80/hr
 5. Cheapest matching GPU is selected automatically
+6. Preseeds "glm-4.7-flash" model after deployment
 
 ## Combining with Other Flags
 
@@ -219,11 +255,12 @@ The deployment will fail. Adjust `DEFAULT_MIN_COST_PER_HOUR` or `DEFAULT_MAX_COS
 ### Using "null" Network Volume
 
 When `DEFAULT_NETWORK_VOLUME=null`:
-- No network volume is attached to the pod
+- No network volume is attached to pod
 - Pod uses container disk storage (non-persistent)
 - Data is lost when the pod is terminated
 - Allows for "zero costs when not running" since you only pay for the pod while it's running
 - GPU selection happens across all datacenters (not tied to a volume's datacenter)
+- If `DEFAULT_PRESEED=true`, the model specified by `DEFAULT_MODEL` will be automatically downloaded via `ollama pull`
 
 ## Aliasing for Quick Access
 
@@ -249,3 +286,4 @@ Common error messages when using defaults:
 | `Template 'X' not found` | Template name doesn't match | Check available templates with `python main.py deploy` and update `.env` |
 | `Network volume 'X' not found` | Volume name doesn't match | Check available volumes with `python main.py deploy` and update `.env` |
 | `No available GPU configuration found` | Cost filters too restrictive | Adjust min/max cost filters in `.env` |
+| `Model preseeding failed` | `ollama pull` command failed | Check model name is correct, check pod logs, continue with warning |

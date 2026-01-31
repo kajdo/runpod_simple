@@ -371,3 +371,42 @@ class SSHTunnel:
         
         self.processes.clear()
         display_success("All tunnels stopped")
+    
+    def execute_remote_command(self, command: str, timeout: int = 300) -> Tuple[bool, str]:
+        """
+        Execute a single command on the remote pod via SSH.
+        
+        Args:
+            command: Command to execute on remote pod
+            timeout: Timeout in seconds (default: 5 minutes)
+        
+        Returns:
+            Tuple of (success: bool, output: str)
+        """
+        ssh_cmd = [
+            "ssh",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "ConnectTimeout=10",
+            "-p", str(self.ssh_port),
+            f"{self.username}@{self.pod_ip}",
+            command
+        ]
+        
+        if self.ssh_key_path:
+            ssh_cmd.insert(1, "-i")
+            ssh_cmd.insert(2, self.ssh_key_path)
+        
+        try:
+            result = subprocess.run(
+                ssh_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            output = result.stdout + result.stderr
+            return result.returncode == 0, output
+        except subprocess.TimeoutExpired:
+            return False, f"Command timed out after {timeout}s"
+        except Exception as e:
+            return False, str(e)

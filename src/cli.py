@@ -12,6 +12,7 @@ from .selector import (
     select_network_volume,
     select_pod_or_new,
     display_success,
+    display_warning,
     display_error,
     display_info
 )
@@ -118,7 +119,7 @@ class CLI:
             conn = self.pod_manager.get_existing_pod(pod_id)
             self.current_pod_id = pod_id
             
-            self._create_tunnels(conn, args.no_cleanup)
+            self._create_tunnels(conn, args.no_cleanup, use_container_only=False)
         
         except Exception as e:
             display_error(f"Failed to reuse pod: {e}")
@@ -246,9 +247,10 @@ class CLI:
         
         conn = self.pod_manager.get_connection_details(pod.id)
         
-        self._create_tunnels(conn, args.no_cleanup)
+        use_container_only = (volume_id is None or volume_id == "")
+        self._create_tunnels(conn, args.no_cleanup, use_container_only=use_container_only)
     
-    def _create_tunnels(self, conn: dict, no_cleanup: bool) -> None:
+    def _create_tunnels(self, conn: dict, no_cleanup: bool, use_container_only: bool = False) -> None:
         """Create SSH tunnels and keep them alive."""
         
         display_info(f"\n[bold]Connection Details:[/bold]")
@@ -274,6 +276,19 @@ class CLI:
             sys.exit(1)
         
         display_info(f"\n{message}")
+        
+        # Model preseeding for container-only setups
+        if use_container_only and self.config.get_default_preseed():
+            default_model = self.config.get_default_model()
+            if default_model:
+                display_info(f"\n[bold]Preseeding model: {default_model}[/bold]")
+                success, output = tunnel.execute_remote_command(f"ollama pull {default_model}")
+                
+                if success:
+                    display_success("Model preseeded successfully")
+                else:
+                    display_warning(f"Model preseeding failed: {output}")
+                    display_warning("Continuing with tunnel setup...")
         
         # We handle cleanup via the try/except KeyboardInterrupt below.
         # This avoids double-cleanup race conditions that occurred with signal handlers.

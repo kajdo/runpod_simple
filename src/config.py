@@ -125,6 +125,18 @@ class Config:
         except ValueError:
             return None
     
+    def get_default_model(self) -> Optional[str]:
+        """Load DEFAULT_MODEL from environment."""
+        value = os.getenv("DEFAULT_MODEL")
+        return value.strip() if value else None
+    
+    def get_default_preseed(self) -> Optional[bool]:
+        """Load DEFAULT_PRESEED from environment."""
+        value = os.getenv("DEFAULT_PRESEED")
+        if not value:
+            return None
+        return value.strip().lower() == "true"
+    
     def validate(self) -> tuple[bool, str]:
         """Validate configuration and return (is_valid, error_message)."""
         if not self.api_key:
