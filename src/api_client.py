@@ -28,7 +28,7 @@ class NetworkVolume:
     id: str
     name: str
     size: int
-    data_center_id: str
+    data_center_id: Optional[str]
 
 
 @dataclass

@@ -85,6 +85,70 @@ class Config:
         
         return None
     
+    def get_default_template(self) -> Optional[str]:
+        """Load DEFAULT_TEMPLATE from environment."""
+        value = os.getenv("DEFAULT_TEMPLATE")
+        return value.strip() if value else None
+    
+    def get_default_network_volume(self) -> Optional[str]:
+        """Load DEFAULT_NETWORK_VOLUME from environment (may be 'null')."""
+        value = os.getenv("DEFAULT_NETWORK_VOLUME")
+        if not value:
+            return None
+        value = value.strip()
+        return value if value.lower() != "null" else None
+    
+    def get_default_allow_two_gpus(self) -> Optional[bool]:
+        """Load DEFAULT_ALLOW_TWO_GPUS from environment."""
+        value = os.getenv("DEFAULT_ALLOW_TWO_GPUS")
+        if not value:
+            return None
+        return value.strip().lower() == "true"
+    
+    def get_default_min_cost_per_hour(self) -> Optional[float]:
+        """Load DEFAULT_MIN_COST_PER_HOUR from environment."""
+        value = os.getenv("DEFAULT_MIN_COST_PER_HOUR")
+        if not value:
+            return None
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    
+    def get_default_max_cost_per_hour(self) -> Optional[float]:
+        """Load DEFAULT_MAX_COST_PER_HOUR from environment."""
+        value = os.getenv("DEFAULT_MAX_COST_PER_HOUR")
+        if not value:
+            return None
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    
+    def get_default_model(self) -> Optional[str]:
+        """Load DEFAULT_MODEL from environment."""
+        value = os.getenv("DEFAULT_MODEL")
+        return value.strip() if value else None
+    
+    def get_default_preseed(self) -> Optional[bool]:
+        """Load DEFAULT_PRESEED from environment."""
+        value = os.getenv("DEFAULT_PRESEED")
+        if not value:
+            return None
+        return value.strip().lower() == "true"
+
+    def get_warmup_enabled(self) -> bool:
+        """Load WARMUP_ENABLED from environment (default: false)."""
+        value = os.getenv("WARMUP_ENABLED")
+        if not value:
+            return False
+        return value.strip().lower() == "true"
+
+    def get_warmup_prompt(self) -> str:
+        """Load WARMUP_PROMPT from environment (default: 'Hello')."""
+        value = os.getenv("WARMUP_PROMPT")
+        return value.strip() if value else "Hello"
+
     def validate(self) -> tuple[bool, str]:
         """Validate configuration and return (is_valid, error_message)."""
         if not self.api_key:

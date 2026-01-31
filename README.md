@@ -38,8 +38,15 @@ Options:
   --template-id ID     Use specific template ID (skip selection)
   --volume-id ID       Use specific network volume ID (skip selection)
   --auto-select-gpu    Auto-select cheapest GPU without prompting
+  --defaults          Use default configuration from .env (no interactive prompts)
   --no-cleanup        Don't delete pod on exit (keep running)
 ```
+
+**Notes:**
+- When only one template/volume exists, it's auto-selected
+- With `--auto-select-gpu`, the cheapest GPU is chosen automatically
+- With `--defaults`, configuration is loaded from .env without prompts
+- GPU selection shows all 24GB+ options with cheapest marked with ★
 
 **Notes:**
 - When only one template/volume exists, it's auto-selected
@@ -58,6 +65,10 @@ Options:
 - Progress bars for pod deployment
 - Clear error messages for deployment failures
 - Datacenter compatibility checks
+- Default configuration for unattended deployment
+
+### Configuration
+For detailed information about default configuration and unattended deployment, see [Defaults Documentation](./docs/defaults.md).
 
 ### Network Access
 The tool tries to bind SSH tunnels to `0.0.0.0` for network-wide access.

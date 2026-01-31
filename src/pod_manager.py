@@ -3,13 +3,20 @@
 import time
 from typing import Optional, List
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .api_client import RunPodAPIClient, Pod
 from .selector import display_success, display_error, display_info
 
 
 console = Console()
+
+
+def _format_elapsed(seconds: int) -> str:
+    """Format elapsed seconds as MM:SS."""
+    minutes = seconds // 60
+    secs = seconds % 60
+    return f"{minutes}:{secs:02d}"
 
 
 class PodManager:
@@ -22,7 +29,7 @@ class PodManager:
     def deploy_pod(
         self,
         template_id: Optional[str],
-        network_volume_id: str,
+        network_volume_id: Optional[str],
         gpu_config: dict,
         name: Optional[str] = None,
         ports: Optional[List[str]] = None
@@ -35,7 +42,10 @@ class PodManager:
         
         display_info(f"Deploying pod: {name}")
         display_info(f"  Template ID: {template_id}")
-        display_info(f"  Network Volume: {network_volume_id}")
+        if network_volume_id:
+            display_info(f"  Network Volume: {network_volume_id}")
+        else:
+            display_info(f"  Network Volume: None (using container disk)")
         display_info(f"  GPU: {gpu_config['display_name']} x{gpu_config['gpu_count']}")
         
         try:
@@ -83,9 +93,6 @@ class PodManager:
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TimeRemainingColumn(),
             console=console
         ) as progress:
             
@@ -107,7 +114,7 @@ class PodManager:
                     has_ssh = bool(pod.port_mappings and "22" in pod.port_mappings)
                     
                     if has_ip and has_ssh:
-                        progress.update(task, completed=100, total=100)
+                        progress.stop()
                         display_success(f"Pod is RUNNING: {pod.name}")
                         return pod
                     
@@ -116,17 +123,19 @@ class PodManager:
                     if not has_ip: missing.append("Public IP")
                     if not has_ssh: missing.append("SSH Port")
                     
+                    elapsed_str = _format_elapsed(elapsed)
                     progress.update(
                         task,
-                        description=f"Pod RUNNING, waiting for: {', '.join(missing)}... ({elapsed}s)"
+                        description=f"Pod RUNNING, waiting for: {', '.join(missing)}... [dim]{elapsed_str}[/dim]"
                     )
                 
                 elif pod.status in ["TERMINATED", "EXITED"]:
                     raise RuntimeError(f"Pod failed with status: {pod.status}")
                 else:
+                    elapsed_str = _format_elapsed(elapsed)
                     progress.update(
                         task,
-                        description=f"Pod status: {pod.status} ({elapsed}s)"
+                        description=f"Pod status: {pod.status} [dim]{elapsed_str}[/dim]"
                     )
                 
                 time.sleep(check_interval)
