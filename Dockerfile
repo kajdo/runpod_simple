@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y \
     psmisc \
     openssh-server \
     net-tools \
+    nvtop \
     && rm -rf /var/lib/apt/lists/*
 
 # 5. Install pip for Python 3.11
