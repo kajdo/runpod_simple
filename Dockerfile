@@ -14,6 +14,7 @@ ENV OLLAMA_MAX_LOADED_MODELS=1
 ENV OLLAMA_KV_CACHE_TYPE=q8_0
 ENV WEBUI_HOST=0.0.0.0
 ENV WEBUI_PORT=8080
+ENV WEBUI_AUTH=False
 ENV DATA_DIR=/workspace/openwebui/data
 ENV OLLAMA_BASE_URL=http://127.0.0.1:11434
 
@@ -93,8 +94,8 @@ RUN echo '#!/bin/bash\n\
     open-webui serve' > /start.sh && chmod +x /start.sh
 
 # 10. Expose necessary ports
-EXPOSE 11434
-EXPOSE 8080
+# EXPOSE 11434
+# EXPOSE 8080
 EXPOSE 22
 
 CMD ["/start.sh"]
