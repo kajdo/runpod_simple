@@ -17,7 +17,11 @@ def select_optimal_gpu(
     gpu_types: List[GPUInfo],
     availability: Dict[str, int] = {},
     min_vram_gb: int = 24,
-    auto_select: bool = False
+    auto_select: bool = False,
+    min_cost: Optional[float] = None,
+    max_cost: Optional[float] = None,
+    allow_two_gpus: Optional[bool] = None,
+    quiet: bool = False
 ) -> Dict[str, Any]:
     """
     Find optimal GPU configuration for given network volume.
@@ -28,6 +32,10 @@ def select_optimal_gpu(
         availability: Dict mapping gpu_id to max available count
         min_vram_gb: Minimum VRAM required
         auto_select: If True, auto-select cheapest available without prompting
+        min_cost: Minimum hourly cost filter
+        max_cost: Maximum hourly cost filter
+        allow_two_gpus: If False, only allow Qty=1 (no dual GPU)
+        quiet: If True, don't display the GPU selection table
     
     Returns dict with:
         - gpu_type_id: str
@@ -37,7 +45,7 @@ def select_optimal_gpu(
         - display_name: str
     """
     
-    datacenter = volume.data_center_id
+    datacenter = volume.data_center_id if volume else "All regions"
     
     display_success(f"Finding GPU for datacenter: {datacenter}")
     display_success(f"Minimum VRAM requirement: {min_vram_gb} GB")
@@ -75,6 +83,18 @@ def select_optimal_gpu(
                 "is_available": True
             })
     
+    # Apply cost filters
+    if min_cost is not None or max_cost is not None:
+        candidates = [
+            cand for cand in candidates
+            if (min_cost is None or cand["cost_per_hour"] >= min_cost) and
+               (max_cost is None or cand["cost_per_hour"] <= max_cost)
+        ]
+    
+    # Apply allow_two_gpus filter
+    if allow_two_gpus is False:
+        candidates = [cand for cand in candidates if cand["gpu_count"] == 1]
+    
     if not candidates:
         raise RuntimeError(
             f"No available GPU configuration found matching criteria in {datacenter}.\n"
@@ -87,10 +107,9 @@ def select_optimal_gpu(
     cheapest = candidates[0]
     
     count_str = f"x{cheapest['gpu_count']}" if cheapest['gpu_count'] > 1 else ""
-    display_success(f"\nCheapest available option: {cheapest['display_name']} {count_str} ({cheapest['total_vram_gb']}GB) @ ${cheapest['cost_per_hour']:.2f}/hr")
+    display_success(f"Selected: {cheapest['display_name']} {count_str} ({cheapest['total_vram_gb']}GB) @ ${cheapest['cost_per_hour']:.2f}/hr")
     
-    if auto_select:
-        display_info("Auto-selected cheapest available GPU")
+    if auto_select or quiet:
         return cheapest
     
     table = Table(title=f"Available GPUs (>= {min_vram_gb}GB) in {datacenter}")

@@ -22,7 +22,7 @@ class PodManager:
     def deploy_pod(
         self,
         template_id: Optional[str],
-        network_volume_id: str,
+        network_volume_id: Optional[str],
         gpu_config: dict,
         name: Optional[str] = None,
         ports: Optional[List[str]] = None
@@ -35,7 +35,10 @@ class PodManager:
         
         display_info(f"Deploying pod: {name}")
         display_info(f"  Template ID: {template_id}")
-        display_info(f"  Network Volume: {network_volume_id}")
+        if network_volume_id:
+            display_info(f"  Network Volume: {network_volume_id}")
+        else:
+            display_info(f"  Network Volume: None (using container disk)")
         display_info(f"  GPU: {gpu_config['display_name']} x{gpu_config['gpu_count']}")
         
         try:

@@ -85,6 +85,46 @@ class Config:
         
         return None
     
+    def get_default_template(self) -> Optional[str]:
+        """Load DEFAULT_TEMPLATE from environment."""
+        value = os.getenv("DEFAULT_TEMPLATE")
+        return value.strip() if value else None
+    
+    def get_default_network_volume(self) -> Optional[str]:
+        """Load DEFAULT_NETWORK_VOLUME from environment (may be 'null')."""
+        value = os.getenv("DEFAULT_NETWORK_VOLUME")
+        if not value:
+            return None
+        value = value.strip()
+        return value if value.lower() != "null" else None
+    
+    def get_default_allow_two_gpus(self) -> Optional[bool]:
+        """Load DEFAULT_ALLOW_TWO_GPUS from environment."""
+        value = os.getenv("DEFAULT_ALLOW_TWO_GPUS")
+        if not value:
+            return None
+        return value.strip().lower() == "true"
+    
+    def get_default_min_cost_per_hour(self) -> Optional[float]:
+        """Load DEFAULT_MIN_COST_PER_HOUR from environment."""
+        value = os.getenv("DEFAULT_MIN_COST_PER_HOUR")
+        if not value:
+            return None
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    
+    def get_default_max_cost_per_hour(self) -> Optional[float]:
+        """Load DEFAULT_MAX_COST_PER_HOUR from environment."""
+        value = os.getenv("DEFAULT_MAX_COST_PER_HOUR")
+        if not value:
+            return None
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    
     def validate(self) -> tuple[bool, str]:
         """Validate configuration and return (is_valid, error_message)."""
         if not self.api_key:

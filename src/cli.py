@@ -139,42 +139,98 @@ class CLI:
         
         template_id = None
         volume_id = None
+        volume = None
+        use_defaults = args.defaults
         
         if args.template_id:
             template_id = args.template_id
             display_info(f"Using specified template ID: {template_id}")
+            use_defaults = False
+        elif use_defaults:
+            default_template_name = self.config.get_default_template()
+            if not default_template_name:
+                display_error("DEFAULT_TEMPLATE not set in .env")
+                return
+            
+            # Find template by name
+            template = next((t for t in templates if t.name == default_template_name), None)
+            if not template:
+                display_error(f"Template '{default_template_name}' not found. Available templates:")
+                for t in templates:
+                    display_error(f"  - {t.name}")
+                return
+            
+            template_id = template.id
+            display_info(f"Using default template: {template.name}")
         else:
             template_id = select_template(templates, auto_select=(len(templates) == 1))
         
         volumes = self.api.get_network_volumes()
         
-        if not volumes:
-            display_error("No network volumes found")
-            return
-        
         if args.volume_id:
             volume_id = args.volume_id
             display_info(f"Using specified volume ID: {volume_id}")
+            use_defaults = False
+        elif use_defaults:
+            default_volume_name = self.config.get_default_network_volume()
+            if default_volume_name is not None:
+                # Find volume by name
+                volume = next((v for v in volumes if v.name == default_volume_name), None)
+                if not volume:
+                    display_error(f"Network volume '{default_volume_name}' not found. Available volumes:")
+                    for v in volumes:
+                        display_error(f"  - {v.name}")
+                    return
+                volume_id = volume.id
+                display_info(f"Using default network volume: {volume.name}")
+            else:
+                # DEFAULT_NETWORK_VOLUME is null or not set - no network volume
+                display_info("Using default: no network volume")
+                # Create a dummy volume with no datacenter for cross-region GPU selection
+                from .api_client import NetworkVolume
+                volume = NetworkVolume(id="", name="None", size=0, data_center_id=None)
         else:
+            if not volumes:
+                display_error("No network volumes found")
+                return
             volume_id = select_network_volume(volumes, auto_select=(len(volumes) == 1))
         
-        volume = next((v for v in volumes if v.id == volume_id), None)
         if not volume:
-            display_error(f"Volume {volume_id} not found")
-            return
+            volume = next((v for v in volumes if v.id == volume_id), None)
+            if not volume:
+                display_error(f"Volume {volume_id} not found")
+                return
         
         # Resolve template ports
         selected_template = next((t for t in templates if t.id == template_id), None)
         template_ports = selected_template.ports if selected_template else None
         
-        # Get GPU types and availability for the specific datacenter
-        gpu_types, availability = self.api.get_gpu_types(volume.data_center_id)
+        # Get GPU types and availability for the specific datacenter or all regions
+        if volume.data_center_id:
+            gpu_types, availability = self.api.get_gpu_types(volume.data_center_id)
+        else:
+            # Query across all datacenters
+            gpu_types, availability = self.api.get_gpu_types(None)
+        
+        # Get GPU filters from defaults if using defaults mode
+        min_cost = None
+        max_cost = None
+        allow_two_gpus = None
+        
+        if use_defaults:
+            min_cost = self.config.get_default_min_cost_per_hour()
+            max_cost = self.config.get_default_max_cost_per_hour()
+            allow_two_gpus = self.config.get_default_allow_two_gpus()
         
         gpu_config = select_optimal_gpu(
             volume, 
             gpu_types, 
             availability=availability,
-            auto_select=args.auto_select_gpu
+            auto_select=args.auto_select_gpu,
+            min_cost=min_cost,
+            max_cost=max_cost,
+            allow_two_gpus=allow_two_gpus,
+            quiet=use_defaults
         )
         
         pod = self.pod_manager.deploy_pod(
@@ -329,6 +385,11 @@ def main() -> int:
         "--auto-select-gpu",
         action="store_true",
         help="Auto-select cheapest GPU without prompting"
+    )
+    deploy_parser.add_argument(
+        "--defaults",
+        action="store_true",
+        help="Use default configuration from .env (no interactive prompts)"
     )
     
     subparsers.add_parser("list", help="List all pods")
