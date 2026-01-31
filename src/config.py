@@ -136,7 +136,19 @@ class Config:
         if not value:
             return None
         return value.strip().lower() == "true"
-    
+
+    def get_warmup_enabled(self) -> bool:
+        """Load WARMUP_ENABLED from environment (default: false)."""
+        value = os.getenv("WARMUP_ENABLED")
+        if not value:
+            return False
+        return value.strip().lower() == "true"
+
+    def get_warmup_prompt(self) -> str:
+        """Load WARMUP_PROMPT from environment (default: 'Hello')."""
+        value = os.getenv("WARMUP_PROMPT")
+        return value.strip() if value else "Hello"
+
     def validate(self) -> tuple[bool, str]:
         """Validate configuration and return (is_valid, error_message)."""
         if not self.api_key:

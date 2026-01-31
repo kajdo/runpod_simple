@@ -7,15 +7,27 @@ import sys
 import time
 import os
 import stat
+import re
 from typing import List, Tuple, Optional, Any
 from rich.console import Console
 from rich.table import Table
+
 from rich import box
 
 from .selector import display_success, display_warning, display_error, display_info
 
 
 console = Console()
+
+
+# ANSI escape sequence pattern - matches common escape sequences
+# Handles both \x1b prefix and sequences that may have lost their prefix
+ANSI_ESCAPE = re.compile(r'(\x1B|\033)([@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|(\[[0-?]*[ -/]*[@-~])')
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    return ANSI_ESCAPE.sub('', text)
 
 
 class SSHTunnel:
@@ -408,5 +420,65 @@ class SSHTunnel:
             return result.returncode == 0, output
         except subprocess.TimeoutExpired:
             return False, f"Command timed out after {timeout}s"
+        except Exception as e:
+            return False, str(e)
+
+    def execute_remote_command_streaming(
+        self,
+        command: str,
+        timeout: int = 900
+    ) -> Tuple[bool, str]:
+        """
+        Execute a command on the remote pod via SSH with streaming output.
+        
+        Uses PTY allocation (-t flag) to allow remote programs to control the
+        terminal properly, enabling in-place progress updates (e.g., ollama pull).
+        
+        Args:
+            command: Command to execute on remote pod
+            timeout: Timeout in seconds (default: 15 minutes)
+        
+        Returns:
+            Tuple of (success: bool, output: str)
+        """
+        ssh_cmd = [
+            "ssh",
+            "-t",  # Force pseudo-terminal allocation for proper progress display
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "ConnectTimeout=10",
+            "-p", str(self.ssh_port),
+            f"{self.username}@{self.pod_ip}",
+            command
+        ]
+        
+        if self.ssh_key_path:
+            ssh_cmd.insert(1, "-i")
+            ssh_cmd.insert(2, self.ssh_key_path)
+        
+        start_time = time.time()
+        
+        try:
+            # Start process with inherited stdout/stderr for direct terminal output
+            process = subprocess.Popen(
+                ssh_cmd,
+                stdout=None,  # Inherit parent's stdout for direct terminal output
+                stderr=None   # Inherit parent's stderr
+            )
+            
+            # Poll with timeout
+            while process.poll() is None:
+                if (time.time() - start_time) > timeout:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except:
+                        process.kill()
+                        process.wait()
+                    return False, f"Command timed out after {timeout}s"
+                time.sleep(0.1)
+            
+            return process.returncode == 0, ""
+        
         except Exception as e:
             return False, str(e)

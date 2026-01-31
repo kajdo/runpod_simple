@@ -253,7 +253,7 @@ class CLI:
     def _create_tunnels(self, conn: dict, no_cleanup: bool, use_container_only: bool = False) -> None:
         """Create SSH tunnels and keep them alive."""
         
-        display_info(f"\n[bold]Connection Details:[/bold]")
+        display_info(f"[bold]Connection Details:[/bold]")
         display_info(f"  Pod IP:     {conn['ip']}")
         display_info(f"  SSH Port:    {conn['ssh_port']}")
         display_info(f"  Pod Name:    {conn['pod_name']}")
@@ -275,21 +275,47 @@ class CLI:
                 self.pod_manager.terminate_pod(self.current_pod_id)
             sys.exit(1)
         
-        display_info(f"\n{message}")
+        display_info(message)
         
         # Model preseeding for container-only setups
+        default_model = None
         if use_container_only and self.config.get_default_preseed():
             default_model = self.config.get_default_model()
             if default_model:
-                display_info(f"\n[bold]Preseeding model: {default_model}[/bold]")
-                success, output = tunnel.execute_remote_command(f"ollama pull {default_model}")
-                
+                display_info(f"[bold]Preseeding model: {default_model}[/bold]")
+                success, output = tunnel.execute_remote_command_streaming(f"ollama pull {default_model}", timeout=900)
+
                 if success:
                     display_success("Model preseeded successfully")
                 else:
                     display_warning(f"Model preseeding failed: {output}")
                     display_warning("Continuing with tunnel setup...")
-        
+
+        # Warmup LLM call (runs independently of preseeding, based on WARMUP_ENABLED switch)
+        if self.config.get_warmup_enabled():
+            if not default_model:
+                default_model = self.config.get_default_model()
+
+            if default_model:
+                display_info(f"Warming up model: {default_model}")
+                import requests
+
+                try:
+                    response = requests.post(
+                        "http://localhost:11434/api/generate",
+                        json={
+                            "model": default_model,
+                            "prompt": self.config.get_warmup_prompt(),
+                            "stream": False
+                        },
+                        timeout=300  # 5 min timeout for model loading + generation
+                    )
+                    response.raise_for_status()
+                    display_success("Model warmup completed successfully")
+                except Exception as e:
+                    display_warning(f"Model warmup failed: {e}")
+                    display_warning("Continuing with tunnel setup...")
+
         # We handle cleanup via the try/except KeyboardInterrupt below.
         # This avoids double-cleanup race conditions that occurred with signal handlers.
         
