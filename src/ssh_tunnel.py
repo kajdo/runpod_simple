@@ -271,46 +271,10 @@ class SSHTunnel:
 
                 # If we got here, success!
                 
-                # Ensure helper script exists
-                helper_cmd = self._create_ssh_helper_script()
-                
-                console.print()
-                table = Table(title=f"SSH Tunnels to {self.pod_ip}", box=box.ROUNDED)
-                table.add_column("Service", style="cyan", no_wrap=True)
-                table.add_column("Local Address", style="green")
-                table.add_column("Remote Endpoint (Pod)", style="yellow")
-                table.add_column("Access URL", style="bold blue")
-
-                # Add SSH Tunnel entry
-                table.add_row(
-                    "SSH Tunnel",
-                    "-",
-                    f"{self.pod_ip}:{self.ssh_port}",
-                    "-"
-                )
-
-                for tunnel in self.tunnels:
-                    local_bind = f"{bind_addr}:{tunnel['local']}"
-                    
-                    # Show Pod IP + Remote Port as requested
-                    remote_target = f"{self.pod_ip}:{tunnel['remote']}"
-                    
-                    # Use appropriate IP for URL based on binding
-                    display_ip = "127.0.0.1" if bind_addr == "127.0.0.1" else local_ip
-                    url = f"http://{display_ip}:{tunnel['local']}"
-                    
-                    # Special handling for SSH Local tunnel
-                    if tunnel['remote'] == 22:
-                        url = helper_cmd
-                    
-                    table.add_row(
-                        tunnel['name'],
-                        local_bind,
-                        remote_target,
-                        url
-                    )
-                
-                console.print(table)
+                # Store table data for later display
+                self._bind_addr = bind_addr
+                self._local_ip = local_ip
+                self._helper_cmd = self._create_ssh_helper_script()
                 
                 if bind_addr == "127.0.0.1":
                     success_msg = "Tunnels created (localhost-only). Run with sudo for network access."
@@ -384,6 +348,53 @@ class SSHTunnel:
         
         self.processes.clear()
         display_success("All tunnels stopped")
+    
+    def print_tunnel_table(self) -> None:
+        """Print the tunnel table (call after all setup is complete)."""
+        if not hasattr(self, '_bind_addr') or not hasattr(self, '_local_ip'):
+            return
+        
+        bind_addr = self._bind_addr
+        local_ip = self._local_ip
+        helper_cmd = self._helper_cmd
+        
+        console.print()
+        table = Table(title=f"SSH Tunnels to {self.pod_ip}", box=box.ROUNDED)
+        table.add_column("Service", style="cyan", no_wrap=True)
+        table.add_column("Local Address", style="green")
+        table.add_column("Remote Endpoint (Pod)", style="yellow")
+        table.add_column("Access URL", style="bold blue")
+
+        # Add SSH Tunnel entry
+        table.add_row(
+            "SSH Tunnel",
+            "-",
+            f"{self.pod_ip}:{self.ssh_port}",
+            "-"
+        )
+
+        for tunnel in self.tunnels:
+            local_bind = f"{bind_addr}:{tunnel['local']}"
+            
+            # Show Pod IP + Remote Port as requested
+            remote_target = f"{self.pod_ip}:{tunnel['remote']}"
+            
+            # Use appropriate IP for URL based on binding
+            display_ip = "127.0.0.1" if bind_addr == "127.0.0.1" else local_ip
+            url = f"http://{display_ip}:{tunnel['local']}"
+            
+            # Special handling for SSH Local tunnel
+            if tunnel['remote'] == 22:
+                url = helper_cmd
+            
+            table.add_row(
+                tunnel['name'],
+                local_bind,
+                remote_target,
+                url
+            )
+        
+        console.print(table)
     
     def execute_remote_command(self, command: str, timeout: int = 300) -> Tuple[bool, str]:
         """

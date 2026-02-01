@@ -506,6 +506,9 @@ except Exception as e:
             else:
                 display_warning(f"Failed to configure Open WebUI settings: {output}")
 
+        # Print tunnel table after all setup is complete
+        tunnel.print_tunnel_table()
+
         # We handle cleanup via the try/except KeyboardInterrupt below.
         # This avoids double-cleanup race conditions that occurred with signal handlers.
         
