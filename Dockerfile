@@ -17,6 +17,9 @@ ENV WEBUI_PORT=8080
 ENV WEBUI_AUTH=False
 ENV DATA_DIR=/workspace/openwebui/data
 ENV OLLAMA_BASE_URL=http://127.0.0.1:11434
+ENV ENABLE_RAG_WEB_SEARCH=True
+ENV RAG_WEB_SEARCH_ENGINE=searxng
+ENV SEARXNG_QUERY_URL=http://127.0.0.1:8888/search?q=<query>
 
 # 4. Install Python 3.11 and system tools
 RUN apt-get update && apt-get install -y \
@@ -26,6 +29,7 @@ RUN apt-get update && apt-get install -y \
     python3.11 \
     python3.11-dev \
     python3.11-distutils \
+    python3.11-venv \
     curl \
     git \
     ffmpeg \
@@ -36,6 +40,11 @@ RUN apt-get update && apt-get install -y \
     openssh-server \
     net-tools \
     nvtop \
+    libxslt-dev \
+    zlib1g-dev \
+    libffi-dev \
+    libssl-dev \
+    libxml2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 5. Install pip for Python 3.11
@@ -47,7 +56,25 @@ RUN curl -fsSL https://ollama.com/install.sh | sh
 # 7. Install Open WebUI
 RUN python3.11 -m pip install --no-cache-dir open-webui
 
-# 8. Setup SSH Configuration (Password & Forwarding)
+# 8. Install SearXNG
+RUN git clone --depth 1 https://github.com/searxng/searxng.git /usr/local/searxng/searxng-src && \
+    cd /usr/local/searxng/searxng-src && \
+    python3.11 -m venv "/usr/local/searxng/searx-pyenv" && \
+    . "/usr/local/searxng/searx-pyenv/bin/activate" && \
+    pip install --no-cache-dir -U pip setuptools wheel pyyaml msgspec typing_extensions && \
+    pip install --no-cache-dir --use-pep517 --no-build-isolation -e .
+
+# 9. Configure SearXNG
+RUN mkdir -p /etc/searxng && \
+    cp /usr/local/searxng/searxng-src/utils/templates/etc/searxng/settings.yml /etc/searxng/settings.yml && \
+    sed -i "s/ultrasecretkey/$(openssl rand -hex 16)/g" /etc/searxng/settings.yml && \
+    sed -i "s/debug: false/debug: false/g" /etc/searxng/settings.yml && \
+    sed -i "s/bind_address: \"127.0.0.1\"/bind_address: \"0.0.0.0\"/g" /etc/searxng/settings.yml && \
+    sed -i "s|url: valkey://localhost:6379/0|url: false|g" /etc/searxng/settings.yml && \
+    sed -i "s/limiter: true/limiter: false/g" /etc/searxng/settings.yml && \
+    sed -i "s/  formats:/  formats:\n    - json/g" /etc/searxng/settings.yml
+
+# 10. Setup SSH Configuration (Password & Forwarding)
 RUN mkdir /var/run/sshd && \
     # Set a temporary password for testing
     echo 'root:ollamatesting' | chpasswd && \
@@ -61,7 +88,7 @@ RUN mkdir /var/run/sshd && \
     echo "UseDNS no" >> /etc/ssh/sshd_config && \
     echo "TCPKeepAlive yes" >> /etc/ssh/sshd_config
 
-# 9. Create the workspace and startup script
+# 11. Create the workspace and startup script
 WORKDIR /workspace
 RUN echo '#!/bin/bash\n\
     # Start SSH service\n\
@@ -90,12 +117,17 @@ RUN echo '#!/bin/bash\n\
     sleep 2\n\
     done\n\
     \n\
+    echo "Starting SearXNG..."\n\
+    export SEARXNG_SETTINGS_PATH="/etc/searxng/settings.yml"\n\
+    (cd /usr/local/searxng/searxng-src && /usr/local/searxng/searx-pyenv/bin/python searx/webapp.py) &\n\
+    \n\
     echo "Starting Open WebUI..."\n\
     open-webui serve' > /start.sh && chmod +x /start.sh
 
-# 10. Expose necessary ports
+# 12. Expose necessary ports
 # EXPOSE 11434
 # EXPOSE 8080
+# EXPOSE 8888
 EXPOSE 22
 
 CMD ["/start.sh"]

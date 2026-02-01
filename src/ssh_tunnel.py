@@ -50,6 +50,7 @@ class SSHTunnel:
         self.tunnels = [
             {"local": 11434, "remote": 11434, "name": "Ollama API"},
             {"local": 8080, "remote": 8080, "name": "WebUI"},
+            {"local": 8888, "remote": 8888, "name": "SearXNG"},
             {"local": 2222, "remote": 22, "name": "SSH (Local)"}
         ]
         
