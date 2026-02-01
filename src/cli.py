@@ -324,15 +324,37 @@ class CLI:
         if target_model:
             display_info(f"Configuring Open WebUI settings for model: {target_model}")
             
+            # Trigger Open WebUI sync (required for DB row creation)
+            try:
+                import requests
+                import time
+                display_info("  • Triggering WebUI sync (waiting for API)...")
+                # Try for up to 30 seconds
+                for _ in range(15):
+                    try:
+                        requests.get("http://localhost:8080/api/models", timeout=2)
+                        break
+                    except:
+                        time.sleep(2)
+            except Exception:
+                pass
+
             # Python script to be executed remotely
             db_update_script = f"""
 import sqlite3
 import json
 import os
 import sys
+import time
 
 db_path = '/workspace/openwebui/data/webui.db'
 model_prefix = '{target_model}'
+
+# Wait for DB existence
+for i in range(30):
+    if os.path.exists(db_path):
+        break
+    time.sleep(1)
 
 if not os.path.exists(db_path):
     print('Database not found at ' + db_path)
@@ -354,12 +376,18 @@ try:
             select_query += ", capabilities"
         select_query += " FROM model WHERE id LIKE ?"
         
-        cursor.execute(select_query, (model_prefix + '%',))
-        rows = cursor.fetchall()
+        # Retry loop for model availability (Wait for sync)
+        rows = []
+        for attempt in range(15):
+            cursor.execute(select_query, (model_prefix + '%',))
+            rows = cursor.fetchall()
+            if rows:
+                break
+            print(f"Waiting for model... ({{attempt+1}}/15)")
+            time.sleep(2)
         
         if not rows:
-            print(f'No model found matching {{model_prefix}}')
-            # Don't exit error, just warn, as model might not be loaded yet
+            print(f'No model found matching {{model_prefix}} after retries')
             sys.exit(0)
             
         updated_count = 0
@@ -401,7 +429,7 @@ except Exception as e:
             # Write script to temp file and execute
             remote_cmd = f"cat <<EOF > /tmp/update_db.py\n{db_update_script}\nEOF\npython3.11 /tmp/update_db.py && rm /tmp/update_db.py"
             
-            success, output = tunnel.execute_remote_command_streaming(remote_cmd, timeout=30)
+            success, output = tunnel.execute_remote_command_streaming(remote_cmd, timeout=90)
             if success:
                 display_success("Open WebUI settings configured")
             else:
