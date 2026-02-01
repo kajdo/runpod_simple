@@ -324,106 +324,177 @@ class CLI:
         if target_model:
             display_info(f"Configuring Open WebUI settings for model: {target_model}")
             
-            # Trigger Open WebUI sync (required for DB row creation)
-            try:
-                import requests
-                import time
-                display_info("  • Triggering WebUI sync (waiting for API)...")
-                # Try for up to 30 seconds
-                for _ in range(15):
-                    try:
-                        requests.get("http://localhost:8080/api/models", timeout=2)
-                        break
-                    except:
-                        time.sleep(2)
-            except Exception:
-                pass
-
-            # Python script to be executed remotely
+            # Python script to be executed remotely for robust initialization
             db_update_script = f"""
 import sqlite3
 import json
 import os
 import sys
 import time
+import urllib.request
+import urllib.error
 
 db_path = '/workspace/openwebui/data/webui.db'
 model_prefix = '{target_model}'
 
-# Wait for DB existence
+def make_request(url, method='GET', headers=None, data=None, timeout=30):
+    req = urllib.request.Request(url, method=method)
+    if headers:
+        for key, value in headers.items():
+            req.add_header(key, value)
+    if data:
+        req.data = json.dumps(data).encode('utf-8')
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return response.status, response.read().decode('utf-8')
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode('utf-8')
+    except Exception as e:
+        return 0, str(e)
+
+# Wait for DB existence (up to 30s)
 for i in range(30):
     if os.path.exists(db_path):
         break
     time.sleep(1)
 
 if not os.path.exists(db_path):
-    print('Database not found at ' + db_path)
+    print(f'Database not found at {{db_path}}')
     sys.exit(0)
 
 try:
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
         
-        # Check available columns
-        cursor.execute("PRAGMA table_info(model)")
-        columns = [info[1] for info in cursor.fetchall()]
-        print(f"Model table columns: {{columns}}")
+        # Find Admin User
+        cursor.execute("SELECT id FROM user ORDER BY created_at ASC LIMIT 1")
+        row = cursor.fetchone()
         
-        has_capabilities = 'capabilities' in columns
+        if not row:
+            for _ in range(15):
+                time.sleep(2)
+                cursor.execute("SELECT id FROM user ORDER BY created_at ASC LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    break
         
-        select_query = "SELECT id, params"
-        if has_capabilities:
-            select_query += ", capabilities"
-        select_query += " FROM model WHERE id LIKE ?"
-        
-        # Retry loop for model availability (Wait for sync)
-        rows = []
-        for attempt in range(15):
-            cursor.execute(select_query, (model_prefix + '%',))
-            rows = cursor.fetchall()
-            if rows:
-                break
-            print(f"Waiting for model... ({{attempt+1}}/15)")
-            time.sleep(2)
-        
-        if not rows:
-            print(f'No model found matching {{model_prefix}} after retries')
+        if not row:
+            print("Admin user not found. Cannot inject API key.")
             sys.exit(0)
             
-        updated_count = 0
-        for row in rows:
-            row_id = row[0]
-            params_json = row[1]
+        user_id = row[0]
+        
+        # Inject API Key
+        api_key = "sk-admin-automation-key"
+        current_time = int(time.time())
+        
+        cursor.execute("SELECT key FROM api_key WHERE user_id = ?", (user_id,))
+        key_row = cursor.fetchone()
+        
+        if not key_row:
+            import uuid
+            key_id = str(uuid.uuid4())
+            cursor.execute(
+                "INSERT INTO api_key (id, user_id, key, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (key_id, user_id, api_key, current_time, current_time)
+            )
+            conn.commit()
+            print(f"API Key injected: {{api_key}}")
+        else:
+            api_key = key_row[0]
+        
+        # Get all models from Ollama
+        status, body = make_request("http://localhost:11434/api/tags")
+        
+        if status != 200:
+            print(f"Failed to fetch Ollama models (status: {{status}})")
+            ollama_models = []
+        else:
+            ollama_data = json.loads(body)
+            ollama_models = ollama_data.get('models', [])
+            print(f"Found {{len(ollama_models)}} model(s) in Ollama")
+        
+        # Configure all models via API
+        api_headers = {{
+            "Authorization": f"Bearer {{api_key}}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }}
+        
+        configured_count = 0
+        
+        for model_data in ollama_models:
+            model_id = model_data.get('name') or model_data.get('model')
+            if not model_id:
+                continue
             
-            params = json.loads(params_json) if params_json else {{}}
-            params['function_calling'] = 'native'
+            # Delete existing entry first
+            cursor.execute("DELETE FROM model WHERE id = ?", (model_id,))
+            conn.commit()
             
-            # Prepare update
-            update_sql = "UPDATE model SET params = ?"
-            update_values = []
+            # Build payload for API
+            payload = {{
+                "id": model_id,
+                "name": model_id,
+                "base_model_id": None,
+                "params": {{"function_calling": "native"}},
+                "access_control": {{}},
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "ollama",
+                "connection_type": "local",
+                "is_active": True,
+                "tags": [],
+                "meta": {{
+                    "profile_image_url": "/static/favicon.png",
+                    "description": None,
+                    "suggestion_prompts": None,
+                    "tags": [],
+                    "capabilities": {{
+                        "file_context": True,
+                        "vision": True,
+                        "file_upload": True,
+                        "web_search": True,
+                        "image_generation": True,
+                        "code_interpreter": True,
+                        "citations": True,
+                        "status_updates": True,
+                        "builtin_tools": True
+                    }}
+                }}
+            }}
             
-            if has_capabilities:
-                caps_json = row[2]
-                caps = json.loads(caps_json) if caps_json else {{}}
-                caps['web_search'] = True
-                update_sql += ", capabilities = ?"
-                update_values = [json.dumps(params), json.dumps(caps)]
+            # Add Ollama-specific data
+            payload["ollama"] = {{
+                "name": model_data.get('name'),
+                "model": model_data.get('model'),
+                "modified_at": model_data.get('modified_at'),
+                "size": model_data.get('size'),
+                "digest": model_data.get('digest'),
+                "details": model_data.get('details', {{}}),
+                "connection_type": "local",
+                "urls": [0],
+                "expires_at": int(time.time()) + 86400
+            }}
+            
+            # Create via API
+            status, body = make_request(
+                "http://localhost:8080/api/v1/models/create",
+                method='POST',
+                headers=api_headers,
+                data=payload,
+                timeout=30
+            )
+            
+            if status in [200, 201]:
+                configured_count += 1
             else:
-                # Fallback: try setting web_search in params if capabilities column missing
-                print("Column 'capabilities' not found. Adding web_search to params.")
-                params['web_search'] = True
-                update_values = [json.dumps(params)]
-                
-            update_sql += " WHERE id = ?"
-            update_values.append(row_id)
-            
-            cursor.execute(update_sql, tuple(update_values))
-            updated_count += 1
-            
-        print(f'Updated settings for {{updated_count}} model(s)')
-        conn.commit()
+                print(f"  ✗ {{model_id}}: API Error ({{status}})")
+        
+        print(f"✓ Configured {{configured_count}} model(s) via API")
+        
 except Exception as e:
-    print(f'Error updating DB: {{e}}')
+    print(f'Error: {{e}}')
     sys.exit(1)
 """
             # Write script to temp file and execute
