@@ -19,6 +19,7 @@ ENV DATA_DIR=/workspace/openwebui/data
 ENV OLLAMA_BASE_URL=http://127.0.0.1:11434
 ENV ENABLE_RAG_WEB_SEARCH=True
 ENV RAG_WEB_SEARCH_ENGINE=searxng
+ENV RAG_WEB_SEARCH_ENABLED=True
 ENV SEARXNG_QUERY_URL=http://127.0.0.1:8888/search?q=<query>
 
 # 4. Install Python 3.11 and system tools
