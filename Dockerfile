@@ -46,6 +46,7 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     libssl-dev \
     libxml2-dev \
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 # 5. Install pip for Python 3.11

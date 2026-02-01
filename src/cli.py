@@ -316,6 +316,97 @@ class CLI:
                     display_warning(f"Model warmup failed: {e}")
                     display_warning("Continuing with tunnel setup...")
 
+        # Configure Open WebUI model settings (Agentic Search)
+        target_model = default_model
+        if not target_model:
+            target_model = self.config.get_default_model()
+            
+        if target_model:
+            display_info(f"Configuring Open WebUI settings for model: {target_model}")
+            
+            # Python script to be executed remotely
+            db_update_script = f"""
+import sqlite3
+import json
+import os
+import sys
+
+db_path = '/workspace/openwebui/data/webui.db'
+model_prefix = '{target_model}'
+
+if not os.path.exists(db_path):
+    print('Database not found at ' + db_path)
+    sys.exit(0)
+
+try:
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        
+        # Check available columns
+        cursor.execute("PRAGMA table_info(model)")
+        columns = [info[1] for info in cursor.fetchall()]
+        print(f"Model table columns: {{columns}}")
+        
+        has_capabilities = 'capabilities' in columns
+        
+        select_query = "SELECT id, params"
+        if has_capabilities:
+            select_query += ", capabilities"
+        select_query += " FROM model WHERE id LIKE ?"
+        
+        cursor.execute(select_query, (model_prefix + '%',))
+        rows = cursor.fetchall()
+        
+        if not rows:
+            print(f'No model found matching {{model_prefix}}')
+            # Don't exit error, just warn, as model might not be loaded yet
+            sys.exit(0)
+            
+        updated_count = 0
+        for row in rows:
+            row_id = row[0]
+            params_json = row[1]
+            
+            params = json.loads(params_json) if params_json else {{}}
+            params['function_calling'] = 'native'
+            
+            # Prepare update
+            update_sql = "UPDATE model SET params = ?"
+            update_values = []
+            
+            if has_capabilities:
+                caps_json = row[2]
+                caps = json.loads(caps_json) if caps_json else {{}}
+                caps['web_search'] = True
+                update_sql += ", capabilities = ?"
+                update_values = [json.dumps(params), json.dumps(caps)]
+            else:
+                # Fallback: try setting web_search in params if capabilities column missing
+                print("Column 'capabilities' not found. Adding web_search to params.")
+                params['web_search'] = True
+                update_values = [json.dumps(params)]
+                
+            update_sql += " WHERE id = ?"
+            update_values.append(row_id)
+            
+            cursor.execute(update_sql, tuple(update_values))
+            updated_count += 1
+            
+        print(f'Updated settings for {{updated_count}} model(s)')
+        conn.commit()
+except Exception as e:
+    print(f'Error updating DB: {{e}}')
+    sys.exit(1)
+"""
+            # Write script to temp file and execute
+            remote_cmd = f"cat <<EOF > /tmp/update_db.py\n{db_update_script}\nEOF\npython3.11 /tmp/update_db.py && rm /tmp/update_db.py"
+            
+            success, output = tunnel.execute_remote_command_streaming(remote_cmd, timeout=30)
+            if success:
+                display_success("Open WebUI settings configured")
+            else:
+                display_warning(f"Failed to configure Open WebUI settings: {output}")
+
         # We handle cleanup via the try/except KeyboardInterrupt below.
         # This avoids double-cleanup race conditions that occurred with signal handlers.
         
