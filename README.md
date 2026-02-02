@@ -4,6 +4,9 @@ Template for simple setup of ollama + openwebUI for glm-4.7-flash
 ## Automation CLI
 Automated deployment tool for RunPod pods with SSH tunneling.
 
+![demo](demo.gif)
+
+
 ### Setup
 1. Copy `.env.example` to `.env` and fill in your API key:
 ```bash
