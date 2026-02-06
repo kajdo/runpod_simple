@@ -166,52 +166,71 @@ class CLI:
         else:
             template_id = select_template(templates, auto_select=(len(templates) == 1))
         
-        volumes = self.api.get_network_volumes()
+        # Determine Cloud Type and Volume
+        cloud_type = "SECURE"
+        is_spot = False
         
-        if args.volume_id:
-            volume_id = args.volume_id
-            display_info(f"Using specified volume ID: {volume_id}")
-            use_defaults = False
-        elif use_defaults:
-            default_volume_name = self.config.get_default_network_volume()
-            if default_volume_name is not None:
-                # Find volume by name
-                volume = next((v for v in volumes if v.name == default_volume_name), None)
-                if not volume:
-                    display_error(f"Network volume '{default_volume_name}' not found. Available volumes:")
-                    for v in volumes:
-                        display_error(f"  - {v.name}")
-                    return
-                volume_id = volume.id
-                display_info(f"Using default network volume: {volume.name}")
-            else:
-                # DEFAULT_NETWORK_VOLUME is null or not set - no network volume
-                display_info("Using default: no network volume")
-                # Create a dummy volume with no datacenter for cross-region GPU selection
-                from .api_client import NetworkVolume
-                volume = NetworkVolume(id="", name="None", size=0, data_center_id=None)
+        if args.spot:
+            cloud_type = "COMMUNITY"
+            is_spot = True
+            display_warning("Spot mode enabled: Switching to Community Cloud (Spot)")
+            display_warning("Ignoring Network Volume (datacenter constraint removed)")
+            volume = None
+            volume_id = ""
+        elif args.community:
+            cloud_type = "COMMUNITY"
+            is_spot = False
+            display_warning("Community mode enabled: Switching to Community Cloud (On-Demand)")
+            display_warning("Ignoring Network Volume (datacenter constraint removed)")
+            volume = None
+            volume_id = ""
         else:
-            if not volumes:
-                display_error("No network volumes found")
-                return
-            volume_id = select_network_volume(volumes, auto_select=(len(volumes) == 1))
-        
-        if not volume:
-            volume = next((v for v in volumes if v.id == volume_id), None)
+            volumes = self.api.get_network_volumes()
+            
+            if args.volume_id:
+                volume_id = args.volume_id
+                display_info(f"Using specified volume ID: {volume_id}")
+                use_defaults = False
+            elif use_defaults:
+                default_volume_name = self.config.get_default_network_volume()
+                if default_volume_name is not None:
+                    # Find volume by name
+                    volume = next((v for v in volumes if v.name == default_volume_name), None)
+                    if not volume:
+                        display_error(f"Network volume '{default_volume_name}' not found. Available volumes:")
+                        for v in volumes:
+                            display_error(f"  - {v.name}")
+                        return
+                    volume_id = volume.id
+                    display_info(f"Using default network volume: {volume.name}")
+                else:
+                    # DEFAULT_NETWORK_VOLUME is null or not set - no network volume
+                    display_info("Using default: no network volume")
+                    # Create a dummy volume with no datacenter for cross-region GPU selection
+                    from .api_client import NetworkVolume
+                    volume = NetworkVolume(id="", name="None", size=0, data_center_id=None)
+            else:
+                if not volumes:
+                    display_error("No network volumes found")
+                    return
+                volume_id = select_network_volume(volumes, auto_select=(len(volumes) == 1))
+            
             if not volume:
-                display_error(f"Volume {volume_id} not found")
-                return
+                volume = next((v for v in volumes if v.id == volume_id), None)
+                if not volume:
+                    display_error(f"Volume {volume_id} not found")
+                    return
         
         # Resolve template ports
         selected_template = next((t for t in templates if t.id == template_id), None)
         template_ports = selected_template.ports if selected_template else None
         
         # Get GPU types and availability for the specific datacenter or all regions
-        if volume.data_center_id:
-            gpu_types, availability = self.api.get_gpu_types(volume.data_center_id)
+        if volume and volume.data_center_id:
+            gpu_types, availability = self.api.get_gpu_types(volume.data_center_id, cloud_type=cloud_type)
         else:
             # Query across all datacenters
-            gpu_types, availability = self.api.get_gpu_types(None)
+            gpu_types, availability = self.api.get_gpu_types(None, cloud_type=cloud_type)
         
         # Get GPU filters from defaults if using defaults mode
         min_cost = None
@@ -219,27 +238,59 @@ class CLI:
         allow_two_gpus = None
         
         if use_defaults:
-            min_cost = self.config.get_default_min_cost_per_hour()
-            max_cost = self.config.get_default_max_cost_per_hour()
+            # In Spot/Community mode, we ignore cost filters to ensure we find the cheapest instances
+            # (which might be below the configured safety threshold for on-demand)
+            if not args.spot and not args.community:
+                min_cost = self.config.get_default_min_cost_per_hour()
+                max_cost = self.config.get_default_max_cost_per_hour()
+            
             allow_two_gpus = self.config.get_default_allow_two_gpus()
         
-        gpu_config = select_optimal_gpu(
-            volume, 
-            gpu_types, 
+        gpu_config, gpu_candidates = select_optimal_gpu(
+            volume,
+            gpu_types,
             availability=availability,
             auto_select=args.auto_select_gpu,
             min_cost=min_cost,
             max_cost=max_cost,
             allow_two_gpus=allow_two_gpus,
-            quiet=use_defaults
+            quiet=use_defaults,
+            cloud_type=cloud_type,
+            is_spot=is_spot,
+            return_all_candidates=True
         )
         
-        pod = self.pod_manager.deploy_pod(
-            template_id=template_id,
-            network_volume_id=volume_id,
-            gpu_config=gpu_config,
-            ports=template_ports
-        )
+        max_attempts = 3
+        pod = None
+
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                display_info(f"Trying alternative GPU ({attempt + 1}/{max_attempts})...")
+
+            try:
+                pod = self.pod_manager.deploy_pod(
+                    template_id=template_id,
+                    network_volume_id=volume_id,
+                    gpu_config=gpu_config,
+                    ports=template_ports,
+                    cloud_type=cloud_type,
+                    is_spot=is_spot
+                )
+                break
+            except RuntimeError as e:
+                error_msg = str(e)
+
+                if attempt < max_attempts - 1:
+                    if "no longer any instances available" in error_msg.lower() or "500" in error_msg:
+                        if attempt + 1 < len(gpu_candidates):
+                            import time
+                            gpu_config = gpu_candidates[attempt + 1]
+                            display_warning(f"Deployment attempt {attempt + 1} failed: {error_msg}")
+                            display_info(f"Trying next GPU: {gpu_config['display_name']} x{gpu_config['gpu_count']} @ ${gpu_config['cost_per_hour']:.2f}/hr")
+                            time.sleep(2)
+                            continue
+
+                raise
         
         self.current_pod_id = pod.id
         
@@ -624,6 +675,16 @@ def main() -> int:
         "--defaults",
         action="store_true",
         help="Use default configuration from .env (no interactive prompts)"
+    )
+    deploy_parser.add_argument(
+        "--spot",
+        action="store_true",
+        help="Deploy a Spot instance (Community Cloud). Ignores network volume."
+    )
+    deploy_parser.add_argument(
+        "--community",
+        action="store_true",
+        help="Deploy a Community Cloud instance (On-Demand). Ignores network volume."
     )
     
     subparsers.add_parser("list", help="List all pods")

@@ -32,13 +32,16 @@ class PodManager:
         network_volume_id: Optional[str],
         gpu_config: dict,
         name: Optional[str] = None,
-        ports: Optional[List[str]] = None
+        ports: Optional[List[str]] = None,
+        cloud_type: str = "SECURE",
+        is_spot: bool = False
     ) -> Pod:
         """Deploy a new pod."""
         
         if not name:
             import datetime
-            name = f"pod-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            import uuid
+            name = f"pod-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
         
         display_info(f"Deploying pod: {name}")
         display_info(f"  Template ID: {template_id}")
@@ -47,15 +50,24 @@ class PodManager:
         else:
             display_info(f"  Network Volume: None (using container disk)")
         display_info(f"  GPU: {gpu_config['display_name']} x{gpu_config['gpu_count']}")
+        display_info(f"  Cloud Type: {cloud_type}")
+        if is_spot:
+             display_info(f"  Spot Instance: Yes")
         
         try:
+            if is_spot:
+                display_info(f"  Debug - GPU Type ID: {gpu_config['gpu_type_id']}")
+                display_info(f"  Debug - Template ID: {template_id}")
             pod = self.api.create_pod(
                 name=name,
                 template_id=template_id,
                 network_volume_id=network_volume_id,
                 gpu_type_ids=[gpu_config["gpu_type_id"]],
                 gpu_count=gpu_config["gpu_count"],
-                ports=ports
+                ports=ports,
+                cloud_type=cloud_type,
+                is_spot=is_spot,
+                support_public_ip=True
             )
             
             self.current_pod_id = pod.id
