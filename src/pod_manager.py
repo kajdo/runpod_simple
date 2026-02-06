@@ -32,7 +32,9 @@ class PodManager:
         network_volume_id: Optional[str],
         gpu_config: dict,
         name: Optional[str] = None,
-        ports: Optional[List[str]] = None
+        ports: Optional[List[str]] = None,
+        cloud_type: str = "SECURE",
+        is_spot: bool = False
     ) -> Pod:
         """Deploy a new pod."""
         
@@ -47,6 +49,9 @@ class PodManager:
         else:
             display_info(f"  Network Volume: None (using container disk)")
         display_info(f"  GPU: {gpu_config['display_name']} x{gpu_config['gpu_count']}")
+        display_info(f"  Cloud Type: {cloud_type}")
+        if is_spot:
+             display_info(f"  Spot Instance: Yes")
         
         try:
             pod = self.api.create_pod(
@@ -55,7 +60,10 @@ class PodManager:
                 network_volume_id=network_volume_id,
                 gpu_type_ids=[gpu_config["gpu_type_id"]],
                 gpu_count=gpu_config["gpu_count"],
-                ports=ports
+                ports=ports,
+                cloud_type=cloud_type,
+                is_spot=is_spot,
+                support_public_ip=True
             )
             
             self.current_pod_id = pod.id

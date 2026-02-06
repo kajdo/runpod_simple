@@ -52,6 +52,8 @@ class GPUInfo:
     display_name: str
     memory_in_gb: int
     secure_price: float
+    community_spot_price: Optional[float] = None
+    stock_status: Optional[str] = None
 
 
 class RunPodAPIClient:
@@ -210,7 +212,9 @@ class RunPodAPIClient:
         gpu_count: int,
         cloud_type: str = "SECURE",
         ports: Optional[List[str]] = None,
-        min_vram_gb: int = 24
+        min_vram_gb: int = 24,
+        support_public_ip: bool = True,
+        is_spot: bool = False
     ) -> Pod:
         """Create a new pod."""
         
@@ -227,6 +231,8 @@ class RunPodAPIClient:
             "computeType": "GPU",
             "gpuTypeIds": gpu_type_ids,
             "gpuCount": gpu_count,
+            "supportPublicIp": support_public_ip,
+            "interruptible": is_spot
         }
         
         if final_ports:
@@ -280,7 +286,7 @@ class RunPodAPIClient:
             
         return data
 
-    def get_gpu_types(self, datacenter_id: Optional[str] = None) -> tuple[List[GPUInfo], Dict[str, int]]:
+    def get_gpu_types(self, datacenter_id: Optional[str] = None, cloud_type: str = "SECURE") -> tuple[List[GPUInfo], Dict[str, int]]:
         """
         Get available GPU types with pricing and availability from GraphQL API.
         
@@ -297,13 +303,20 @@ class RunPodAPIClient:
             memoryInGb
             securePrice
             communityPrice
+            communitySpotPrice
             price1: lowestPrice(input: $input1) {
+              minimumBidPrice
+              uninterruptablePrice
+              stockStatus
               gpuTypeDatacenters {
                 dataCenterId
                 availability
               }
             }
             price2: lowestPrice(input: $input2) {
+              minimumBidPrice
+              uninterruptablePrice
+              stockStatus
               gpuTypeDatacenters {
                 dataCenterId
                 availability
@@ -313,16 +326,18 @@ class RunPodAPIClient:
         }
         """
         
+        is_secure = (cloud_type == "SECURE")
+        
         # We query for specific datacenter availability if provided, otherwise generic
         variables = {
             "input1": {
                 "gpuCount": 1,
-                "secureCloud": True,
+                "secureCloud": is_secure,
                 "dataCenterId": datacenter_id if datacenter_id else ""
             },
             "input2": {
                 "gpuCount": 2,
-                "secureCloud": True,
+                "secureCloud": is_secure,
                 "dataCenterId": datacenter_id if datacenter_id else ""
             }
         }
@@ -340,35 +355,59 @@ class RunPodAPIClient:
                 
                 gpu_id = g["id"]
                 
+                # Get stock status for 1x
+                stock_status = None
+                if g.get("price1"):
+                    stock_status = g.get("price1", {}).get("stockStatus")
+
                 gpus.append(GPUInfo(
                     id=gpu_id,
                     display_name=g["displayName"],
                     memory_in_gb=g["memoryInGb"],
-                    secure_price=g.get("securePrice") or 0.0
+                    secure_price=g.get("securePrice") or 0.0,
+                    community_spot_price=g.get("communitySpotPrice"),
+                    stock_status=stock_status
                 ))
                 
                 # Check availability for 1x and 2x
                 max_avail = 0
                 
-                # Check 1x
-                lp1 = g.get("price1")
-                if lp1 and lp1.get("gpuTypeDatacenters"):
-                    for dc_info in lp1["gpuTypeDatacenters"]:
-                        if datacenter_id and dc_info["dataCenterId"] != datacenter_id:
-                            continue
-                        if dc_info.get("availability") == "AVAILABLE":
-                            max_avail = 1
-                            break
-                            
-                # Check 2x (only if 1x was available, usually, but let's check independently)
-                lp2 = g.get("price2")
-                if lp2 and lp2.get("gpuTypeDatacenters"):
-                    for dc_info in lp2["gpuTypeDatacenters"]:
-                        if datacenter_id and dc_info["dataCenterId"] != datacenter_id:
-                            continue
-                        if dc_info.get("availability") == "AVAILABLE":
-                            max_avail = 2
-                            break
+                if not is_secure:
+                    # For Community Cloud, lowestPrice returns pricing (minimumBidPrice) but often empty gpuTypeDatacenters
+                    # We rely on the existence of the price itself to indicate availability
+                    
+                    # Check 1x
+                    lp1 = g.get("price1")
+                    if lp1 and (lp1.get("minimumBidPrice") or lp1.get("uninterruptablePrice")):
+                         max_avail = 1
+                    
+                    # Check 2x
+                    lp2 = g.get("price2")
+                    if lp2 and (lp2.get("minimumBidPrice") or lp2.get("uninterruptablePrice")):
+                         max_avail = 2
+                         
+                else:
+                    # For Secure Cloud, we must check datacenter availability
+                    
+                    # Check 1x
+                    lp1 = g.get("price1")
+                    if lp1 and lp1.get("gpuTypeDatacenters"):
+                        for dc_info in lp1["gpuTypeDatacenters"]:
+                            if datacenter_id and dc_info["dataCenterId"] != datacenter_id:
+                                continue
+                            if dc_info.get("availability") == "AVAILABLE":
+                                max_avail = 1
+                                break
+                                
+                    # Check 2x (only if 1x was available, usually, but let's check independently)
+                    lp2 = g.get("price2")
+                    if lp2 and lp2.get("gpuTypeDatacenters"):
+                        for dc_info in lp2["gpuTypeDatacenters"]:
+                            if datacenter_id and dc_info["dataCenterId"] != datacenter_id:
+                                continue
+                            if dc_info.get("availability") == "AVAILABLE":
+                                max_avail = 2
+                                break
                 
                 availability[gpu_id] = max_avail
                 
