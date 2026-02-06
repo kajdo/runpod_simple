@@ -238,12 +238,12 @@ class CLI:
         allow_two_gpus = None
         
         if use_defaults:
-            # In Spot mode, we ignore the minimum cost filter to ensure we find the cheapest spot instances
+            # In Spot/Community mode, we ignore cost filters to ensure we find the cheapest instances
             # (which might be below the configured safety threshold for on-demand)
-            if not args.spot:
+            if not args.spot and not args.community:
                 min_cost = self.config.get_default_min_cost_per_hour()
+                max_cost = self.config.get_default_max_cost_per_hour()
             
-            max_cost = self.config.get_default_max_cost_per_hour()
             allow_two_gpus = self.config.get_default_allow_two_gpus()
         
         gpu_config = select_optimal_gpu(
