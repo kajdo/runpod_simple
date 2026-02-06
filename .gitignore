@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local Fixes Documentation
+.fixes/
+.todo/
+todo/
+
+# AI Agent Instructions
+#  AGENTS.md contains instructions for AI coding assistants and is not part of the source code
+AGENTS.md

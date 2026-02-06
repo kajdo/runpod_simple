@@ -316,6 +316,199 @@ class CLI:
                     display_warning(f"Model warmup failed: {e}")
                     display_warning("Continuing with tunnel setup...")
 
+        # Configure Open WebUI model settings (Agentic Search)
+        target_model = default_model
+        if not target_model:
+            target_model = self.config.get_default_model()
+            
+        if target_model:
+            display_info(f"Configuring Open WebUI settings for model: {target_model}")
+            
+            # Python script to be executed remotely for robust initialization
+            db_update_script = f"""
+import sqlite3
+import json
+import os
+import sys
+import time
+import urllib.request
+import urllib.error
+
+db_path = '/workspace/openwebui/data/webui.db'
+model_prefix = '{target_model}'
+
+def make_request(url, method='GET', headers=None, data=None, timeout=30):
+    req = urllib.request.Request(url, method=method)
+    if headers:
+        for key, value in headers.items():
+            req.add_header(key, value)
+    if data:
+        req.data = json.dumps(data).encode('utf-8')
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return response.status, response.read().decode('utf-8')
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode('utf-8')
+    except Exception as e:
+        return 0, str(e)
+
+# Wait for DB existence (up to 30s)
+for i in range(30):
+    if os.path.exists(db_path):
+        break
+    time.sleep(1)
+
+if not os.path.exists(db_path):
+    print(f'Database not found at {{db_path}}')
+    sys.exit(0)
+
+try:
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        
+        # Find Admin User
+        cursor.execute("SELECT id FROM user ORDER BY created_at ASC LIMIT 1")
+        row = cursor.fetchone()
+        
+        if not row:
+            for _ in range(15):
+                time.sleep(2)
+                cursor.execute("SELECT id FROM user ORDER BY created_at ASC LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    break
+        
+        if not row:
+            print("Admin user not found. Cannot inject API key.")
+            sys.exit(0)
+            
+        user_id = row[0]
+        
+        # Inject API Key
+        api_key = "sk-admin-automation-key"
+        current_time = int(time.time())
+        
+        cursor.execute("SELECT key FROM api_key WHERE user_id = ?", (user_id,))
+        key_row = cursor.fetchone()
+        
+        if not key_row:
+            import uuid
+            key_id = str(uuid.uuid4())
+            cursor.execute(
+                "INSERT INTO api_key (id, user_id, key, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (key_id, user_id, api_key, current_time, current_time)
+            )
+            conn.commit()
+            print(f"API Key injected: {{api_key}}")
+        else:
+            api_key = key_row[0]
+        
+        # Get all models from Ollama
+        status, body = make_request("http://localhost:11434/api/tags")
+        
+        if status != 200:
+            print(f"Failed to fetch Ollama models (status: {{status}})")
+            ollama_models = []
+        else:
+            ollama_data = json.loads(body)
+            ollama_models = ollama_data.get('models', [])
+            print(f"Found {{len(ollama_models)}} model(s) in Ollama")
+        
+        # Configure all models via API
+        api_headers = {{
+            "Authorization": f"Bearer {{api_key}}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }}
+        
+        configured_count = 0
+        
+        for model_data in ollama_models:
+            model_id = model_data.get('name') or model_data.get('model')
+            if not model_id:
+                continue
+            
+            # Delete existing entry first
+            cursor.execute("DELETE FROM model WHERE id = ?", (model_id,))
+            conn.commit()
+            
+            # Build payload for API
+            payload = {{
+                "id": model_id,
+                "name": model_id,
+                "base_model_id": None,
+                "params": {{"function_calling": "native"}},
+                "access_control": {{}},
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "ollama",
+                "connection_type": "local",
+                "is_active": True,
+                "tags": [],
+                "meta": {{
+                    "profile_image_url": "/static/favicon.png",
+                    "description": None,
+                    "suggestion_prompts": None,
+                    "tags": [],
+                    "capabilities": {{
+                        "file_context": True,
+                        "vision": True,
+                        "file_upload": True,
+                        "web_search": True,
+                        "image_generation": True,
+                        "code_interpreter": True,
+                        "citations": True,
+                        "status_updates": True,
+                        "builtin_tools": True
+                    }}
+                }}
+            }}
+            
+            # Add Ollama-specific data
+            payload["ollama"] = {{
+                "name": model_data.get('name'),
+                "model": model_data.get('model'),
+                "modified_at": model_data.get('modified_at'),
+                "size": model_data.get('size'),
+                "digest": model_data.get('digest'),
+                "details": model_data.get('details', {{}}),
+                "connection_type": "local",
+                "urls": [0],
+                "expires_at": int(time.time()) + 86400
+            }}
+            
+            # Create via API
+            status, body = make_request(
+                "http://localhost:8080/api/v1/models/create",
+                method='POST',
+                headers=api_headers,
+                data=payload,
+                timeout=30
+            )
+            
+            if status in [200, 201]:
+                configured_count += 1
+            else:
+                print(f"  ✗ {{model_id}}: API Error ({{status}})")
+        
+        print(f"✓ Configured {{configured_count}} model(s) via API")
+        
+except Exception as e:
+    print(f'Error: {{e}}')
+    sys.exit(1)
+"""
+            # Write script to temp file and execute
+            remote_cmd = f"cat <<EOF > /tmp/update_db.py\n{db_update_script}\nEOF\npython3.11 /tmp/update_db.py && rm /tmp/update_db.py"
+            
+            success, output = tunnel.execute_remote_command_streaming(remote_cmd, timeout=90)
+            if success:
+                display_success("Open WebUI settings configured")
+            else:
+                display_warning(f"Failed to configure Open WebUI settings: {output}")
+
+        # Print tunnel table after all setup is complete
+        tunnel.print_tunnel_table()
+
         # We handle cleanup via the try/except KeyboardInterrupt below.
         # This avoids double-cleanup race conditions that occurred with signal handlers.
         

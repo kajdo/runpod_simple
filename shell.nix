@@ -6,6 +6,7 @@ pkgs.mkShell {
     python311Packages.rich
     python311Packages.pexpect
     python311Packages.netifaces
+    python311Packages.litellm
     openssh
   ];
 
