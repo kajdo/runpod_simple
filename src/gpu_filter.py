@@ -23,11 +23,12 @@ def select_optimal_gpu(
     allow_two_gpus: Optional[bool] = None,
     quiet: bool = False,
     cloud_type: str = "SECURE",
-    is_spot: bool = False
-) -> Dict[str, Any]:
+    is_spot: bool = False,
+    return_all_candidates: bool = False
+) -> Dict[str, Any] | tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """
     Find optimal GPU configuration for given network volume.
-    
+
     Args:
         volume: Network volume with datacenter information
         gpu_types: List of available GPU types
@@ -40,13 +41,16 @@ def select_optimal_gpu(
         quiet: If True, don't display the GPU selection table
         cloud_type: "SECURE" or "COMMUNITY"
         is_spot: If True, use spot pricing (only for Community Cloud)
-    
+        return_all_candidates: If True, return tuple of (selected_gpu, all_candidates)
+
     Returns dict with:
         - gpu_type_id: str
         - gpu_count: int
         - cost_per_hour: float
         - total_vram_gb: int
         - display_name: str
+
+    Or if return_all_candidates is True, returns tuple of (selected_gpu, candidates_list)
     """
     
     datacenter = volume.data_center_id if volume and volume.data_center_id else "All regions"
@@ -139,11 +143,13 @@ def select_optimal_gpu(
     candidates.sort(key=lambda x: (x["cost_per_hour"], -stock_score(x["stock_status"])))
     
     cheapest = candidates[0]
-    
+
     count_str = f"x{cheapest['gpu_count']}" if cheapest['gpu_count'] > 1 else ""
     display_success(f"Selected: {cheapest['display_name']} {count_str} ({cheapest['total_vram_gb']}GB) @ ${cheapest['cost_per_hour']:.2f}/hr")
-    
+
     if auto_select or quiet:
+        if return_all_candidates:
+            return cheapest, candidates
         return cheapest
     
     table_title = f"Available GPUs (>= {min_vram_gb}GB) in {datacenter}"
@@ -195,6 +201,8 @@ def select_optimal_gpu(
                 selected = candidates[idx]
                 count_suffix = f" x{selected['gpu_count']}" if selected['gpu_count'] > 1 else ""
                 display_success(f"Selected: {selected['display_name']}{count_suffix} ({selected['total_vram_gb']}GB) @ ${selected['cost_per_hour']:.2f}/hr")
+                if return_all_candidates:
+                    return selected, candidates
                 return selected
 
 

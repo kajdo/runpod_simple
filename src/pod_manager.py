@@ -40,7 +40,8 @@ class PodManager:
         
         if not name:
             import datetime
-            name = f"pod-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            import uuid
+            name = f"pod-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
         
         display_info(f"Deploying pod: {name}")
         display_info(f"  Template ID: {template_id}")
@@ -54,6 +55,9 @@ class PodManager:
              display_info(f"  Spot Instance: Yes")
         
         try:
+            if is_spot:
+                display_info(f"  Debug - GPU Type ID: {gpu_config['gpu_type_id']}")
+                display_info(f"  Debug - Template ID: {template_id}")
             pod = self.api.create_pod(
                 name=name,
                 template_id=template_id,

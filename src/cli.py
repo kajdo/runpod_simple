@@ -246,9 +246,9 @@ class CLI:
             
             allow_two_gpus = self.config.get_default_allow_two_gpus()
         
-        gpu_config = select_optimal_gpu(
-            volume, 
-            gpu_types, 
+        gpu_config, gpu_candidates = select_optimal_gpu(
+            volume,
+            gpu_types,
             availability=availability,
             auto_select=args.auto_select_gpu,
             min_cost=min_cost,
@@ -256,17 +256,41 @@ class CLI:
             allow_two_gpus=allow_two_gpus,
             quiet=use_defaults,
             cloud_type=cloud_type,
-            is_spot=is_spot
+            is_spot=is_spot,
+            return_all_candidates=True
         )
         
-        pod = self.pod_manager.deploy_pod(
-            template_id=template_id,
-            network_volume_id=volume_id,
-            gpu_config=gpu_config,
-            ports=template_ports,
-            cloud_type=cloud_type,
-            is_spot=is_spot
-        )
+        max_attempts = 3
+        pod = None
+
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                display_info(f"Trying alternative GPU ({attempt + 1}/{max_attempts})...")
+
+            try:
+                pod = self.pod_manager.deploy_pod(
+                    template_id=template_id,
+                    network_volume_id=volume_id,
+                    gpu_config=gpu_config,
+                    ports=template_ports,
+                    cloud_type=cloud_type,
+                    is_spot=is_spot
+                )
+                break
+            except RuntimeError as e:
+                error_msg = str(e)
+
+                if attempt < max_attempts - 1:
+                    if "no longer any instances available" in error_msg.lower() or "500" in error_msg:
+                        if attempt + 1 < len(gpu_candidates):
+                            import time
+                            gpu_config = gpu_candidates[attempt + 1]
+                            display_warning(f"Deployment attempt {attempt + 1} failed: {error_msg}")
+                            display_info(f"Trying next GPU: {gpu_config['display_name']} x{gpu_config['gpu_count']} @ ${gpu_config['cost_per_hour']:.2f}/hr")
+                            time.sleep(2)
+                            continue
+
+                raise
         
         self.current_pod_id = pod.id
         
