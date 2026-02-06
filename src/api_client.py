@@ -304,7 +304,7 @@ class RunPodAPIClient:
             securePrice
             communityPrice
             communitySpotPrice
-            price1: lowestPrice(input: $input1) {
+            price1gpu: lowestPrice(input: $input1) {
               minimumBidPrice
               uninterruptablePrice
               stockStatus
@@ -313,7 +313,7 @@ class RunPodAPIClient:
                 availability
               }
             }
-            price2: lowestPrice(input: $input2) {
+            price2gpus: lowestPrice(input: $input2) {
               minimumBidPrice
               uninterruptablePrice
               stockStatus
@@ -357,8 +357,8 @@ class RunPodAPIClient:
                 
                 # Get stock status for 1x
                 stock_status = None
-                if g.get("price1"):
-                    stock_status = g.get("price1", {}).get("stockStatus")
+                if g.get("price1gpu"):
+                    stock_status = g.get("price1gpu", {}).get("stockStatus")
 
                 gpus.append(GPUInfo(
                     id=gpu_id,
@@ -377,12 +377,12 @@ class RunPodAPIClient:
                     # We rely on the existence of the price itself to indicate availability
                     
                     # Check 1x
-                    lp1 = g.get("price1")
+                    lp1 = g.get("price1gpu")
                     if lp1 and (lp1.get("minimumBidPrice") or lp1.get("uninterruptablePrice")):
                          max_avail = 1
                     
                     # Check 2x
-                    lp2 = g.get("price2")
+                    lp2 = g.get("price2gpus")
                     if lp2 and (lp2.get("minimumBidPrice") or lp2.get("uninterruptablePrice")):
                          max_avail = 2
                          
@@ -390,7 +390,7 @@ class RunPodAPIClient:
                     # For Secure Cloud, we must check datacenter availability
                     
                     # Check 1x
-                    lp1 = g.get("price1")
+                    lp1 = g.get("price1gpu")
                     if lp1 and lp1.get("gpuTypeDatacenters"):
                         for dc_info in lp1["gpuTypeDatacenters"]:
                             if datacenter_id and dc_info["dataCenterId"] != datacenter_id:
@@ -400,7 +400,7 @@ class RunPodAPIClient:
                                 break
                                 
                     # Check 2x (only if 1x was available, usually, but let's check independently)
-                    lp2 = g.get("price2")
+                    lp2 = g.get("price2gpus")
                     if lp2 and lp2.get("gpuTypeDatacenters"):
                         for dc_info in lp2["gpuTypeDatacenters"]:
                             if datacenter_id and dc_info["dataCenterId"] != datacenter_id:
