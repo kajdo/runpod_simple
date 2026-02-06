@@ -43,17 +43,14 @@ Options:
   --auto-select-gpu    Auto-select cheapest GPU without prompting
   --defaults          Use default configuration from .env (no interactive prompts)
   --no-cleanup        Don't delete pod on exit (keep running)
+  --spot              Deploy a Spot instance (Community Cloud). Ignores network volume.
+  --community         Deploy a Community Cloud instance (On-Demand). Ignores network volume.
 ```
 
 **Notes:**
 - When only one template/volume exists, it's auto-selected
 - With `--auto-select-gpu`, the cheapest GPU is chosen automatically
 - With `--defaults`, configuration is loaded from .env without prompts
-- GPU selection shows all 24GB+ options with cheapest marked with ★
-
-**Notes:**
-- When only one template/volume exists, it's auto-selected
-- With `--auto-select-gpu`, the cheapest GPU is chosen automatically
 - GPU selection shows all 24GB+ options with cheapest marked with ★
 
 ### Features

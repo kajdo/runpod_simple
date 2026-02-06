@@ -22,7 +22,8 @@ def select_optimal_gpu(
     max_cost: Optional[float] = None,
     allow_two_gpus: Optional[bool] = None,
     quiet: bool = False,
-    cloud_type: str = "SECURE"
+    cloud_type: str = "SECURE",
+    is_spot: bool = False
 ) -> Dict[str, Any]:
     """
     Find optimal GPU configuration for given network volume.
@@ -38,6 +39,7 @@ def select_optimal_gpu(
         allow_two_gpus: If False, only allow Qty=1 (no dual GPU)
         quiet: If True, don't display the GPU selection table
         cloud_type: "SECURE" or "COMMUNITY"
+        is_spot: If True, use spot pricing (only for Community Cloud)
     
     Returns dict with:
         - gpu_type_id: str
@@ -53,7 +55,10 @@ def select_optimal_gpu(
     display_success(f"Finding GPU for datacenter: {datacenter}")
     display_success(f"Minimum VRAM requirement: {min_vram_gb} GB")
     if is_community:
-        display_success("Using Community Cloud (Spot) pricing")
+        if is_spot:
+            display_success("Using Community Cloud (Spot) pricing")
+        else:
+            display_success("Using Community Cloud (On-Demand) pricing")
     
     candidates = []
     
@@ -64,8 +69,12 @@ def select_optimal_gpu(
         # Determine price
         price = gpu.secure_price
         if is_community:
-             # Use spot price if available, otherwise secure/base price (though typically spot should be there)
-             price = gpu.community_spot_price if gpu.community_spot_price else gpu.secure_price
+             if is_spot:
+                 # Use spot price if available, fallback to secure/base (though technically improper, prevents crash)
+                 price = gpu.community_spot_price if gpu.community_spot_price else gpu.secure_price
+             else:
+                 # Use community on-demand price
+                 price = gpu.community_price if gpu.community_price else gpu.secure_price
         
         if not price:
             continue
@@ -139,7 +148,7 @@ def select_optimal_gpu(
     
     table_title = f"Available GPUs (>= {min_vram_gb}GB) in {datacenter}"
     if is_community:
-        table_title += " [Community Spot]"
+        table_title += " [Community Spot]" if is_spot else " [Community On-Demand]"
         
     table = Table(title=table_title)
     table.add_column("#", style="cyan", width=4)

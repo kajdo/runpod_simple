@@ -168,9 +168,19 @@ class CLI:
         
         # Determine Cloud Type and Volume
         cloud_type = "SECURE"
+        is_spot = False
+        
         if args.spot:
             cloud_type = "COMMUNITY"
+            is_spot = True
             display_warning("Spot mode enabled: Switching to Community Cloud (Spot)")
+            display_warning("Ignoring Network Volume (datacenter constraint removed)")
+            volume = None
+            volume_id = ""
+        elif args.community:
+            cloud_type = "COMMUNITY"
+            is_spot = False
+            display_warning("Community mode enabled: Switching to Community Cloud (On-Demand)")
             display_warning("Ignoring Network Volume (datacenter constraint removed)")
             volume = None
             volume_id = ""
@@ -245,7 +255,8 @@ class CLI:
             max_cost=max_cost,
             allow_two_gpus=allow_two_gpus,
             quiet=use_defaults,
-            cloud_type=cloud_type
+            cloud_type=cloud_type,
+            is_spot=is_spot
         )
         
         pod = self.pod_manager.deploy_pod(
@@ -254,7 +265,7 @@ class CLI:
             gpu_config=gpu_config,
             ports=template_ports,
             cloud_type=cloud_type,
-            is_spot=args.spot
+            is_spot=is_spot
         )
         
         self.current_pod_id = pod.id
@@ -645,6 +656,11 @@ def main() -> int:
         "--spot",
         action="store_true",
         help="Deploy a Spot instance (Community Cloud). Ignores network volume."
+    )
+    deploy_parser.add_argument(
+        "--community",
+        action="store_true",
+        help="Deploy a Community Cloud instance (On-Demand). Ignores network volume."
     )
     
     subparsers.add_parser("list", help="List all pods")

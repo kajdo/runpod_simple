@@ -52,6 +52,7 @@ class GPUInfo:
     display_name: str
     memory_in_gb: int
     secure_price: float
+    community_price: float = 0.0
     community_spot_price: Optional[float] = None
     stock_status: Optional[str] = None
 
@@ -365,6 +366,7 @@ class RunPodAPIClient:
                     display_name=g["displayName"],
                     memory_in_gb=g["memoryInGb"],
                     secure_price=g.get("securePrice") or 0.0,
+                    community_price=g.get("communityPrice") or 0.0,
                     community_spot_price=g.get("communitySpotPrice"),
                     stock_status=stock_status
                 ))
