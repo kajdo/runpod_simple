@@ -1,5 +1,5 @@
 # 1. Use the NVIDIA CUDA base for GPU acceleration
-FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
 # 2. Set non-interactive and environment defaults
 ENV DEBIAN_FRONTEND=noninteractive
@@ -78,6 +78,18 @@ RUN mkdir -p /etc/searxng && \
     sed -i "s/limiter: true/limiter: false/g" /etc/searxng/settings.yml && \
     sed -i "s/  formats:/  formats:\n    - json/g" /etc/searxng/settings.yml
 
+# 9.1. Install Crawl4ai
+RUN mkdir -p /root/git && \
+    cd /root/git && \
+    git clone --depth 1 https://github.com/unclecode/crawl4ai.git /root/git/crawl4ai && \
+    cd crawl4ai && \
+    python3.11 -m venv venv && \
+    . venv/bin/activate && \
+    pip install -e ".[all]" && \
+    pip install -r deploy/docker/requirements.txt && \
+    crawl4ai-setup && \
+    playwright install-deps 
+
 # 10. Setup SSH Configuration (Password & Forwarding)
 RUN mkdir /var/run/sshd && \
     # Set a temporary password for testing
@@ -124,9 +136,11 @@ RUN echo '#!/bin/bash\n\
     echo "Starting SearXNG..."\n\
     export SEARXNG_SETTINGS_PATH="/etc/searxng/settings.yml"\n\
     (cd /usr/local/searxng/searxng-src && /usr/local/searxng/searx-pyenv/bin/python searx/webapp.py) &\n\
+    echo "Starting crawl4ai..."\n\
+    (cd /root/git/crawl4ai/deploy/docker && export PYTHONPATH=$PYTHONPATH:/root/git/crawl4ai && /root/git/crawl4ai/venv/bin/python -m uvicorn server:app --host 0.0.0.0 --port 11235) &\n\
     \n\
     echo "Starting Open WebUI..."\n\
-    open-webui serve' > /start.sh && chmod +x /start.sh
+    exec open-webui serve' > /start.sh && chmod +x /start.sh
 
 # 12. Expose necessary ports
 # EXPOSE 11434
