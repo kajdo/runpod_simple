@@ -23,6 +23,11 @@ ENV OLLAMA_BASE_URL=http://127.0.0.1:11434
 ENV ENABLE_WEB_SEARCH=True
 ENV WEB_SEARCH_ENGINE=searxng
 ENV SEARXNG_QUERY_URL=http://127.0.0.1:8888/search?q=<query>
+ENV WEB_LOADER_CONCURRENT_REQUESTS=10
+ENV WEB_LOADER_ENGINE=external
+ENV EXTERNAL_WEB_LOADER_URL=http://127.0.0.1:9999/crawl
+ENV EXTERNAL_WEB_LOADER_API_KEY=123
+
 
 # 4. Install Python 3.11 and system tools
 RUN apt-get update && apt-get install -y \
@@ -90,6 +95,15 @@ RUN mkdir -p /root/git && \
     crawl4ai-setup && \
     playwright install-deps 
 
+# 9.2. Install Crawl4ai Py Proxy
+RUN mkdir -p /root/git && \
+    cd /root/git && \
+    git clone --depth 1 https://github.com/kajdo/crawl4ai-py-proxy.git /root/git/crawl4ai-py-proxy && \
+    cd crawl4ai-py-proxy && \
+    python3.11 -m venv venv && \
+    . venv/bin/activate && \
+    pip install -r requirements.txt
+
 # 10. Setup SSH Configuration (Password & Forwarding)
 RUN mkdir /var/run/sshd && \
     # Set a temporary password for testing
@@ -138,6 +152,9 @@ RUN echo '#!/bin/bash\n\
     (cd /usr/local/searxng/searxng-src && /usr/local/searxng/searx-pyenv/bin/python searx/webapp.py) &\n\
     echo "Starting crawl4ai..."\n\
     (cd /root/git/crawl4ai/deploy/docker && export PYTHONPATH=$PYTHONPATH:/root/git/crawl4ai && /root/git/crawl4ai/venv/bin/python -m uvicorn server:app --host 0.0.0.0 --port 11235) &\n\
+    \n\
+    echo "Starting crawl4ai python proxy ..."\n\
+    (cd /root/git/crawl4ai-py-proxy && export PYTHONPATH=$PYTHONPATH:/root/git/crawl4ai-py-proxy && /root/git/crawl4ai-py-proxy/venv/bin/python main.py) &\n\
     \n\
     echo "Starting Open WebUI..."\n\
     exec open-webui serve' > /start.sh && chmod +x /start.sh
