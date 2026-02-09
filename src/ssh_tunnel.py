@@ -495,3 +495,7 @@ class SSHTunnel:
         
         except Exception as e:
             return False, str(e)
+    
+    def get_tunnels_pids(self) -> List[int]:
+        """Return PIDs of all tunnel subprocesses."""
+        return [process.pid for process in self.processes if hasattr(process, 'pid')]
