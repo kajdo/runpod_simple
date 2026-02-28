@@ -1,8 +1,12 @@
 """Command-line interface for RunPod automation."""
 
 import argparse
+import json
+import os
+import signal
 import sys
-from typing import Optional
+import time
+from typing import Optional, List
 from rich.console import Console
 
 from .config import Config
@@ -22,6 +26,7 @@ from .ssh_tunnel import SSHTunnel
 
 
 console = Console()
+TUNNELS_FILE = "/tmp/.runpod_simple/tunnels.json"
 
 
 class CLI:
@@ -119,7 +124,7 @@ class CLI:
             conn = self.pod_manager.get_existing_pod(pod_id)
             self.current_pod_id = pod_id
             
-            self._create_tunnels(conn, args.no_cleanup, use_container_only=False)
+            self._create_tunnels(conn, args.no_cleanup, use_container_only=False, bg=args.bg)
         
         except Exception as e:
             display_error(f"Failed to reuse pod: {e}")
@@ -162,7 +167,11 @@ class CLI:
                 return
             
             template_id = template.id
-            display_info(f"Using default template: {template.name}")
+            default_model = self.config.get_default_model()
+            if default_model:
+                display_info(f"Using default model: [bold bright_cyan]{default_model}[/bold bright_cyan] with template: {template.name}")
+            else:
+                display_info(f"Using default template: {template.name}")
         else:
             template_id = select_template(templates, auto_select=(len(templates) == 1))
         
@@ -299,9 +308,9 @@ class CLI:
         conn = self.pod_manager.get_connection_details(pod.id)
         
         use_container_only = (volume_id is None or volume_id == "")
-        self._create_tunnels(conn, args.no_cleanup, use_container_only=use_container_only)
+        self._create_tunnels(conn, args.no_cleanup, use_container_only=use_container_only, bg=args.bg)
     
-    def _create_tunnels(self, conn: dict, no_cleanup: bool, use_container_only: bool = False) -> None:
+    def _create_tunnels(self, conn: dict, no_cleanup: bool, use_container_only: bool = False, bg: bool = False) -> None:
         """Create SSH tunnels and keep them alive."""
         
         display_info(f"[bold]Connection Details:[/bold]")
@@ -558,17 +567,28 @@ except Exception as e:
                 display_warning(f"Failed to configure Open WebUI settings: {output}")
 
         # Print tunnel table after all setup is complete
-        tunnel.print_tunnel_table()
 
-        # We handle cleanup via the try/except KeyboardInterrupt below.
-        # This avoids double-cleanup race conditions that occurred with signal handlers.
+        tunnel.print_tunnel_table()
         
+        # Display model information
+        default_model = self.config.get_default_model()
+        if default_model:
+            console.print()
+            display_info(f"Model: [bold bright_cyan]{default_model}[/bold bright_cyan]")
+
+        # Background mode: save PIDs and exit
+        if bg:
+            tunnel_pids = tunnel.get_tunnels_pids()
+            self._save_tunnels(tunnel_pids, self.current_pod_id, conn)
+            display_success("Tunnels started in background mode. Use 'stop' to terminate.")
+            return
+
+        # Normal mode: wait for Ctrl+C
         try:
             tunnel.wait()
         except KeyboardInterrupt:
             tunnel.stop_all()
             if not no_cleanup and self.current_pod_id:
-                # self.pod_manager is Optional, but init_api guarantees it's set
                 if self.pod_manager:
                      self.pod_manager.terminate_pod(self.current_pod_id)
             display_success("Cleanup complete")
@@ -635,6 +655,92 @@ except Exception as e:
         except Exception as e:
             display_error(f"Failed to delete pod: {e}")
             return 1
+    
+    def _save_tunnels(self, pids: List[int], pod_id: str, conn: dict) -> None:
+        """Save tunnel PIDs to persistent storage."""
+        os.makedirs(os.path.dirname(TUNNELS_FILE), exist_ok=True)
+        
+        tunnels_data = []
+        if os.path.exists(TUNNELS_FILE):
+            with open(TUNNELS_FILE, 'r') as f:
+                tunnels_data = json.load(f)
+        
+        entry = {
+            "pids": pids,
+            "pod_id": pod_id,
+            "pod_ip": conn["ip"],
+            "ssh_port": conn["ssh_port"],
+            "started_at": int(time.time())
+        }
+        tunnels_data.append(entry)
+        
+        with open(TUNNELS_FILE, 'w') as f:
+            json.dump(tunnels_data, f, indent=2)
+    
+    def _load_tunnels(self) -> List[dict]:
+        """Load tunnel PIDs from persistent storage."""
+        if not os.path.exists(TUNNELS_FILE):
+            return []
+        
+        with open(TUNNELS_FILE, 'r') as f:
+            return json.load(f)
+    
+    def _clear_tunnels(self) -> None:
+        """Clear tunnel records from persistent storage."""
+        if os.path.exists(TUNNELS_FILE):
+            os.remove(TUNNELS_FILE)
+    
+    def stop_all_pods(self, args) -> int:
+        """Stop all running pods and SSH tunnels."""
+        
+        if not self.init_config():
+            return 1
+        
+        if not self.init_api():
+            return 1
+        
+        assert self.pod_manager is not None
+        
+        try:
+            # Kill SSH tunnels first
+            tunnels_data = self._load_tunnels()
+            if tunnels_data:
+                display_info(f"Terminating {len(tunnels_data)} SSH tunnel group(s)...")
+                killed_pids = 0
+                for entry in tunnels_data:
+                    for pid in entry.get("pids", []):
+                        try:
+                            os.kill(pid, signal.SIGTERM)
+                            killed_pids += 1
+                        except ProcessLookupError:
+                            pass
+                
+                if killed_pids > 0:
+                    display_success(f"Terminated {killed_pids} SSH tunnel process(es)")
+                
+                self._clear_tunnels()
+            else:
+                display_info("No active SSH tunnels found in storage")
+            
+            # Stop all running pods
+            pods = self.api.get_pods()
+            running_pods = [p for p in pods if p.status == "RUNNING"]
+            
+            if not running_pods:
+                display_info("No running pods found")
+                return 0
+            
+            display_info(f"Stopping {len(running_pods)} running pod(s)...")
+            
+            for pod in running_pods:
+                self.pod_manager.terminate_pod(pod.id)
+            
+            display_success(f"Stopped all {len(running_pods)} pod(s)")
+            return 0
+        
+        except Exception as e:
+            display_error(f"Failed to stop pods: {e}")
+            return 1
 
 
 def main() -> int:
@@ -686,11 +792,18 @@ def main() -> int:
         action="store_true",
         help="Deploy a Community Cloud instance (On-Demand). Ignores network volume."
     )
+    deploy_parser.add_argument(
+        "--bg",
+        action="store_true",
+        help="Run in background mode - create tunnels and exit immediately"
+    )
     
     subparsers.add_parser("list", help="List all pods")
     
     delete_parser = subparsers.add_parser("delete", help="Delete a specific pod")
     delete_parser.add_argument("pod_id", help="Pod ID to delete")
+    
+    subparsers.add_parser("stop", help="Stop all running pods and SSH tunnels")
     
     args = parser.parse_args()
     
@@ -706,6 +819,8 @@ def main() -> int:
         return cli.list_pods(args)
     elif args.command == "delete":
         return cli.delete_pod(args)
+    elif args.command == "stop":
+        return cli.stop_all_pods(args)
     else:
         parser.print_help()
         return 1
