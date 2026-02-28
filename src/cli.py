@@ -167,7 +167,11 @@ class CLI:
                 return
             
             template_id = template.id
-            display_info(f"Using default template: {template.name}")
+            default_model = self.config.get_default_model()
+            if default_model:
+                display_info(f"Using default model: [bold bright_cyan]{default_model}[/bold bright_cyan] with template: {template.name}")
+            else:
+                display_info(f"Using default template: {template.name}")
         else:
             template_id = select_template(templates, auto_select=(len(templates) == 1))
         
@@ -563,7 +567,14 @@ except Exception as e:
                 display_warning(f"Failed to configure Open WebUI settings: {output}")
 
         # Print tunnel table after all setup is complete
+
         tunnel.print_tunnel_table()
+        
+        # Display model information
+        default_model = self.config.get_default_model()
+        if default_model:
+            console.print()
+            display_info(f"Model: [bold bright_cyan]{default_model}[/bold bright_cyan]")
 
         # Background mode: save PIDs and exit
         if bg:
